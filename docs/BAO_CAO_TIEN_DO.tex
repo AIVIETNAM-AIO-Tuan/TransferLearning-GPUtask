@@ -164,7 +164,7 @@ mức xác suất đầu ra.
         \scriptsize phim chụp trước \\[-2pt] \scriptsize token EHR (\code{ColTokBag})};
 
 % --- hang 4: tron + ket qua ---
-\node[box=64mm, fill=black!4] (H) at (0, -7.15) {\textbf{[H] TRỘN THEO TIER}
+\node[box=64mm, fill=black!4] (H) at (0, -7.15) {\textbf{[H] TRỘN THEO LỚP}
         \\[-1pt] \scriptsize head 0.40 \quad medium 0.40 \quad tail 0.00};
 \node[res] (R) at (0, -8.75) {\textbf{macro-mAP $=$ 0.2625}};
 
@@ -197,16 +197,21 @@ RAD-DINO ViT-B/14 ở độ phân giải $518^2$, cho $37\times37 = 1369$ patch 
 (bản \code{a2\_E3}) rồi \textbf{đông cứng hoàn toàn} cho mọi thí nghiệm sau. Việc mở
 băng thêm đã được thử và đóng lại (mục~\ref{sec:closed}).
 
-Hệ quả quan trọng của việc đông cứng: mọi seed của ta \emph{dùng chung} 86M tham số
+Hệ quả quan trọng của việc freeze: mọi seed của ta \emph{dùng chung} 86M tham số
 giống hệt nhau, chỉ khác 7.3M tham số đầu đọc. Đây là lý do việc thêm seed chỉ cho
 $+0.0008$, và cũng là lý do hướng \emph{ensemble backbone fine-tune độc lập} vẫn còn mở.
 
 \subsubsection*{[B] ML-Decoder --- đầu đọc đa nhãn}
 
-Theo Alibaba-MIIL. Bốn mươi \textbf{class query cố định} (\code{requires\_grad = False},
-đúng bài gốc) cross-attend vào patch token; không có self-attention giữa các query.
-Đầu ra qua \code{GroupFC} --- mỗi lớp một vector trọng số riêng, giảm tham số so với
-Linear đầy đủ.
+Mỗi bệnh lý được gán một vector truy vấn (Q) riêng. Bốn mươi vector này giữ nguyên từ lúc
+khởi tạo và không tham gia huấn luyện, nên toàn bộ việc học dồn vào phép chú ý và các
+lớp phía sau.
+Từng truy vấn quét khắp các patch của ảnh rồi gom về một biểu diễn dành riêng cho bệnh
+lý đó. Các truy vấn không trao đổi với nhau, nên bốn mươi bệnh lý được đọc song song và
+độc lập vì trong bài toán đa nhãn một phim có thể mang nhiều bệnh cùng lúc.
+Ở bước chấm điểm, mỗi bệnh lý dùng một vector trọng số của riêng nó trên đúng biểu diễn
+của nó, thay vì trải phẳng cả bốn mươi biểu diễn rồi đưa qua một lớp tuyến tính chung.
+Số tham số nhờ vậy giảm bốn mươi lần.
 
 \begin{Verbatim}[fontsize=\small,frame=single,framesep=2mm]
 q  = class_query[40]                       # cố định, không học
@@ -218,13 +223,24 @@ logits = GroupFC(h)                        # [B, 40]
 
 \subsubsection*{[C] Bộ mã hoá EHR --- \code{ColTokBag}}
 
-Biến bảng EHR thành \textbf{chuỗi token} thay vì một vector phẳng: mỗi cột sinh một
-token riêng ($T_j = b_j + e_j \cdot W_j$), cộng một token tổng hợp và một token túi
-vi khuẩn. Chiều token \code{D\_ETOK = 256}.
+Mỗi lần chụp đi kèm 257 con số: 217 đặc trưng lâm sàng (xét nghiệm, sinh hiệu, bệnh nền,
+các cờ vi sinh) và 40 điểm số do một mô hình cây chấm trước đó trên chính bảng EHR.
 
-\code{MicroBag} xử lý phần vi sinh dạng \emph{ragged} (mỗi study có số vi khuẩn khác
-nhau, trung bình 1.7) bằng \code{EmbeddingBag(mode='sum')}, tránh phải đệm về độ dài
-cố định.
+Thay vì nén cả 257 số thành một vector duy nhất, mỗi cột được cấp một token riêng. Danh
+tính token thuộc về \emph{cột}: mỗi đặc trưng có một hướng cố định trong không gian 256
+chiều, dùng chung cho mọi bệnh nhân. Giá trị của từng bệnh nhân chỉ quyết định \emph{biên
+độ} --- đặc trưng nào lệch xa mức bình thường thì token của nó mạnh lên. Nhờ vậy mô hình
+biết con số đang đọc là bạch cầu hay huyết áp, thay vì nhận một dãy số vô danh.
+
+Mỗi lần chụp vì thế cho một chuỗi 259 token: 257 token cột, một token tóm tắt cả hàng, và
+một token vi sinh.
+
+Vi sinh phải tách ra vì số chủng nuôi cấy được không cố định --- nhiều ca không mọc chủng
+nào, một số ca mọc vài chủng, trung bình 1.7 chủng mỗi lần chụp. Đệm mọi ca về độ dài của
+ca nhiều nhất thì gần như toàn bộ ô là rỗng, nên thay vào đó các chủng của một ca được
+cộng gộp lại thành một token duy nhất, mỗi chủng có trọng số theo số lần nó mọc. Ba mươi
+cột vi sinh dạng phẳng đã bị loại khỏi bảng để không đếm hai lần.
+
 
 \subsubsection*{[D] \code{Tier1} --- điều kiện hoá bằng EHR ở mức patch}
 
