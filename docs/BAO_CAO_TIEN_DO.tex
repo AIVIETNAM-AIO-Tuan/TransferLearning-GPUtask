@@ -39,11 +39,16 @@
 % khong dung \rowcolor. Trang thai duoc the hien bang CHU MAU o cot dau, ben hon ne
 % nen mau va con doc duoc khi in den trang.
 \usepackage{fancyvrb}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,calc}
 \usepackage{enumitem}
 \usepackage[hidelinks]{hyperref}
 \usepackage{caption}
 
 \captionsetup{font=small,labelfont=bf}
+% Cho TeX noi khoang trang thay vi de chu tran ra le. Khong sua duoc mot TU dai hon
+% ca dong — cho do phai tu \allowbreak.
+\setlength{\emergencystretch}{3em}
 \setlist[itemize]{itemsep=2pt,topsep=3pt,parsep=0pt}
 \setlist[enumerate]{itemsep=2pt,topsep=3pt,parsep=0pt}
 
@@ -120,30 +125,68 @@ tier trước mốc đó dùng thang khác, cần đối chiếu cẩn thận.
 Hệ thống là \textbf{ensemble hai thành viên} có kiến trúc khác nhau, trộn theo tier ở
 mức xác suất đầu ra.
 
-\begin{Verbatim}[fontsize=\small,frame=single,framesep=3mm]
-                 ẢNH X-QUANG (518x518)          EHR + PHIM TRƯỚC
-                          |                            |
-        +-----------------+-----------------+          |
-        |                                   |          |
-  [A] RAD-DINO ViT-B/14  @518          [G] ConvNeXtV2-nano @518
-      đông cứng, 1369 patch token          khởi tạo từ PadChest
-        |                                   |          |
-        |                                   |          |
-  [E] Tier1Img  <-- phim X-ray trước đó ------------ + ---------+
-        |         (mức patch, LayerScale)   |
-  [D] Tier1     <-- token EHR -------------+
-        |         (patch = query)           |
-        |                                   |
-  [B] ML-Decoder                       ML-Decoder
-      40 class query (KHÔNG học)           (dùng chung mã)
-        |                                   |
-   logits 40                            logits 40
-        |                                   |
-        +----------- [H] TRỘN THEO TIER ----+
-                     head 0.40 | medium 0.40 | tail 0.00
-                              |
-                        macro-mAP = 0.2625
-\end{Verbatim}
+\begin{center}
+\begin{tikzpicture}[
+  font=\small,
+  node distance=0mm,
+  box/.style   = {draw, rounded corners=2pt, align=center, inner sep=4pt,
+                  minimum height=8mm, text width=#1},
+  bb/.style    = {box=40mm, fill=blue!5},
+  head/.style  = {box=33mm, fill=black!4},
+  ctx/.style   = {box=30mm, fill=orange!8, dashed},
+  io/.style    = {box=50mm, fill=none},
+  res/.style   = {box=44mm, fill=green!7},
+  ar/.style    = {-{Latex[length=2mm]}, thick},
+  lb/.style    = {font=\scriptsize, inner sep=1.5pt},
+]
+
+\def\xL{-4.15}   \def\xR{4.15}
+
+% --- hang 1: dau vao ---
+\node[io]  (img) at (0, 0) {\textbf{ẢNH X-QUANG NGỰC} \\[-1pt] \scriptsize $518 \times 518$};
+
+% --- hang 2: hai backbone ---
+\node[bb]  (A) at (\xL, -2.05) {\textbf{[A] RAD-DINO} \\[-1pt] \scriptsize ViT-B/14 · \textbf{đông cứng}
+                                \\[-2pt] \scriptsize 1369 patch · 9.46 mm};
+\node[bb]  (G) at (\xR, -2.05) {\textbf{[G] ConvNeXtV2} \\[-1pt] \scriptsize nano · \textbf{có huấn luyện}
+                                \\[-2pt] \scriptsize khởi tạo từ PadChest};
+
+% --- hang 3: hai dau doc giong het nhau ---
+\node[head] (HL) at (\xL, -4.75) {\textbf{ĐẦU ĐỌC} \\[-1pt]
+        \scriptsize [E] Tier1Img \\[-2pt] \scriptsize [D] Tier1
+        \\[-2pt] \scriptsize [B] ML-Decoder};
+\node[head] (HR) at (\xR, -4.75) {\textbf{ĐẦU ĐỌC} \\[-1pt]
+        \scriptsize [E] Tier1Img \\[-2pt] \scriptsize [D] Tier1
+        \\[-2pt] \scriptsize [B] ML-Decoder};
+
+% --- ngu canh o giua, cap cho CA HAI ---
+\node[ctx] (C) at (0, -4.75) {\textbf{NGỮ CẢNH} \\[-1pt]
+        \scriptsize phim chụp trước \\[-2pt] \scriptsize token EHR (\code{ColTokBag})};
+
+% --- hang 4: tron + ket qua ---
+\node[box=64mm, fill=black!4] (H) at (0, -7.15) {\textbf{[H] TRỘN THEO TIER}
+        \\[-1pt] \scriptsize head 0.40 \quad medium 0.40 \quad tail 0.00};
+\node[res] (R) at (0, -8.75) {\textbf{macro-mAP $=$ 0.2625}};
+
+% --- mui ten ---
+\draw[ar] (img.south) -- ++(0,-0.35) -| (A.north);
+\draw[ar] (img.south) -- ++(0,-0.35) -| (G.north);
+\draw[ar] (A) -- node[lb, right] {patch token} (HL);
+\draw[ar] (G) -- node[lb, right] {patch token} (HR);
+\draw[ar] (C) -- (HL);
+\draw[ar] (C) -- (HR);
+\draw[ar] (HL.south) -- ++(0,-0.55) node[lb, above right] {logits 40} -| (H.north);
+\draw[ar] (HR.south) -- ++(0,-0.55) node[lb, above left]  {logits 40} -| (H.north);
+\draw[ar] (H) -- (R);
+
+\end{tikzpicture}
+\end{center}
+
+\noindent Hai nhánh dùng \textbf{cùng một mã đầu đọc} nhưng là hai bản sao huấn luyện độc
+lập. Khác biệt thật nằm ở backbone: RAD-DINO \emph{đông cứng} (chỉ 7.3M tham số đầu đọc
+được học), còn ConvNeXtV2 thì \emph{huấn luyện cả backbone}. Thứ tự trong đầu đọc là
+\code{Tier1Img} (phim trước, không gian \code{D\_CXR}) $\to$ \code{pin} $\to$ \code{Tier1}
+(token EHR) $\to$ ML-Decoder.
 
 \subsection{Các module}
 
@@ -219,7 +262,8 @@ mà nhánh dương vẫn đúng nên lỗi ẩn rất lâu.
 
 \subsubsection*{[G] Thành viên thứ hai --- \code{cnn\_full}}
 
-\code{convnextv2\_nano.fcmae\_ft\_in22k\_in1k}, khởi tạo từ trọng số đã pretrain trên
+\code{convnextv2\_nano.\allowbreak fcmae\_\allowbreak ft\_\allowbreak in22k\_\allowbreak in1k},
+khởi tạo từ trọng số đã pretrain trên
 \textbf{PadChest} (\code{convnextv2\_padchest.pt}), dùng lại nguyên văn
 \code{Tier1}/\code{Tier1Img}/ML-Decoder. Có assert kiểm trọng số khác ImageNet để bắt
 trường hợp file PadChest không tải được.
@@ -432,7 +476,8 @@ $\gamma_p{=}0$. Đây là hướng \emph{độ chắc cao nhất} trong danh sá
 backbone đông cứng. Đúng công thức vô địch (\emph{fine-tune + ensemble}), và tập chọn
 sạch gấp 6.6 lần. \\
 \addlinespace
-\MO &EHR mở rộng: thủ thuật, thở máy, kiểu nhập viện & $\sim$3.5h (bậc 1--2, 0 GPU) & $+0.002$ &
+\MO &EHR mở rộng: thủ thuật, thở máy, kiểu nhập viện & $\sim$3.5h & $+0.002$ &
+\emph{Bậc 1--2 không cần GPU.}
 \code{Hydropneumothorax} và \code{Pneumomediastinum} có bội số EHR cao nhất nhóm tail
 ($4.2\times$, $4.8\times$) nhưng EHR hiện thiếu đúng loại đặc trưng: dẫn lưu màng phổi,
 chọc dịch, đặt nội khí quản, PEEP. Khoảng 15 cột, cùng dạng, cắm thẳng vào
