@@ -1,0 +1,613 @@
+% =====================================================================
+%  BAO CAO TIEN DO — CXR-LT 2024
+%  Bien dich:  xelatex BAO_CAO_TIEN_DO.tex     (khuyen dung)
+%          hoac pdflatex BAO_CAO_TIEN_DO.tex   (can vntex/T5 — co san trong TeX Live)
+%  Nguon so lieu: JOURNAL.md, Event.md, Progress.md, CHECKLIST_STAGE5_OPEN.md,
+%                 PLAN_VUOT_0281.md, output cua nb61/64/64b/65/66/67/68.
+%  Moi con so trong file nay doc tu log/file, khong go tay tu tri nho.
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[utf8]{inputenc}
+  \usepackage[T5]{fontenc}
+\else
+  \usepackage{fontspec}
+  \setmainfont{Latin Modern Roman}
+  \setmonofont{Latin Modern Mono}
+\fi
+
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+% KHONG nap `colortbl`: ban 2026/05/01 v1.0l goi \insert@pcolumn — mot lenh chi co o
+% `array.sty` moi. Voi array.sty cu (MiKTeX 24.1) thi CHI CAN nap colortbl la MOI cot
+% p{} vo ("Undefined control sequence" + "Missing # in alignment preamble"), ke ca khi
+% khong dung \rowcolor. Trang thai duoc the hien bang CHU MAU o cot dau, ben hon ne
+% nen mau va con doc duoc khi in den trang.
+\usepackage{fancyvrb}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{caption}
+
+\captionsetup{font=small,labelfont=bf}
+\setlist[itemize]{itemsep=2pt,topsep=3pt,parsep=0pt}
+\setlist[enumerate]{itemsep=2pt,topsep=3pt,parsep=0pt}
+
+\newcommand{\DONG}{\textbf{\textcolor{red!62!black}{ĐÓNG}}}
+\newcommand{\MO}{\textbf{\textcolor{green!42!black}{MỞ}}}
+\newcommand{\XONG}{\textbf{\textcolor{blue!58!black}{XONG}}}
+\newcommand{\code}[1]{\texttt{\small #1}}
+
+\title{\textbf{CXR-LT 2024 — Báo cáo tiến độ}\\[2mm]
+       \large Kiến trúc, các hướng nghiên cứu, và khoảng cách tới mục tiêu}
+\author{Nhóm CXR $\times$ EHR}
+\date{10 tháng 9, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Chỉ số hiện tại (test)} & \textbf{0.2625} & macro-mAP, 40 nhãn, 78{,}946 ảnh \\
+\textbf{Nhà vô địch (đội A)} & 0.281 & CXR-LT 2024 Task 1 \\
+\textbf{Khoảng cách} & \textbf{0.0185} & tương đương hạng 7--8 / 17 đội \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{2mm}
+\noindent\textit{Mọi con số trong báo cáo được đọc lại từ log và output notebook. Nguồn: }
+\code{JOURNAL.md}, \code{Event.md}, \code{CHECKLIST\_STAGE5\_OPEN.md}, \code{PLAN\_VUOT\_0281.md}.
+
+\renewcommand{\contentsname}{Mục lục}
+\renewcommand{\tablename}{Bảng}
+\tableofcontents
+\newpage
+
+% =====================================================================
+\section{Kiến trúc hiện tại}
+% =====================================================================
+
+\subsection{Bài toán và dữ liệu}
+
+Phân loại \textbf{đa nhãn} 40 bệnh lý trên phim X-quang ngực, dữ liệu MIMIC-CXR theo
+thiết lập chính thức của thử thách CXR-LT 2024 (Lin et al., arXiv:2506.07984). Thiết
+lập của chúng ta khớp tuyệt đối với ban tổ chức, nên con số so sánh trực tiếp được
+với bảng xếp hạng.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}llr@{}}
+\toprule
+\textbf{Thành phần} & \textbf{Mô tả} & \textbf{Số lượng} \\
+\midrule
+Train        & chia theo bệnh nhân 70\%          & 258{,}871 ảnh \\
+Development  & chia theo bệnh nhân 10\%          & 39{,}293 ảnh \\
+Test         & chia theo bệnh nhân 20\%          & 78{,}946 ảnh \\
+Nhãn Task 1  & đa nhãn, mất cân bằng nặng        & 40 \\
+Nhãn Task 3  & zero-shot, \textbf{không được chạm} & 5 \\
+Thước đo     & macro-averaged AP; hoà thì xét mAUROC & --- \\
+\bottomrule
+\end{tabular}
+\caption{Thiết lập dữ liệu chính thức. Tuân thủ nhãn đã được kiểm: 5 nhãn zero-shot
+(\code{Bulla}, \code{Cardiomyopathy}, \code{Hilum}, \code{Osteopenia}, \code{Scoliosis})
+không xuất hiện trong tập 40 nhãn của ta.}
+\end{table}
+
+\paragraph{Phân tầng theo độ hiếm.} Ban tổ chức chia theo \emph{tỉ lệ hiện} trên train:
+head $>10\%$, medium $1$--$10\%$, tail $<1\%$, cho \textbf{9 / 15 / 16} nhãn. Thang riêng
+mà ta dùng trước ngày 08/09 chia theo \emph{số ca} và cho 13 / 16 / 11 --- mọi báo cáo
+tier trước mốc đó dùng thang khác, cần đối chiếu cẩn thận.
+
+\subsection{Sơ đồ tổng thể}
+
+Hệ thống là \textbf{ensemble hai thành viên} có kiến trúc khác nhau, trộn theo tier ở
+mức xác suất đầu ra.
+
+\begin{Verbatim}[fontsize=\small,frame=single,framesep=3mm]
+                 ẢNH X-QUANG (518x518)          EHR + PHIM TRƯỚC
+                          |                            |
+        +-----------------+-----------------+          |
+        |                                   |          |
+  [A] RAD-DINO ViT-B/14  @518          [G] ConvNeXtV2-nano @518
+      đông cứng, 1369 patch token          khởi tạo từ PadChest
+        |                                   |          |
+        |                                   |          |
+  [E] Tier1Img  <-- phim trước ------------ + ---------+
+        |         (mức patch, LayerScale)   |
+  [D] Tier1     <-- token EHR -------------+
+        |         (patch = query)           |
+        |                                   |
+  [B] ML-Decoder                       ML-Decoder
+      40 class query (KHÔNG học)           (dùng chung mã)
+        |                                   |
+   logits 40                            logits 40
+        |                                   |
+        +----------- [H] TRỘN THEO TIER ----+
+                     head 0.40 | medium 0.40 | tail 0.00
+                              |
+                        macro-mAP = 0.2625
+\end{Verbatim}
+
+\subsection{Các module}
+
+\subsubsection*{[A] Nhánh ảnh --- backbone RAD-DINO}
+
+RAD-DINO ViT-B/14 ở độ phân giải $518^2$, cho $37\times37 = 1369$ patch token
+($9{,}46$ mm mỗi patch). Backbone được fine-tune một lần ở notebook \code{38a}
+(bản \code{a2\_E3}) rồi \textbf{đông cứng hoàn toàn} cho mọi thí nghiệm sau. Việc mở
+băng thêm đã được thử và đóng lại (mục~\ref{sec:closed}).
+
+Hệ quả quan trọng của việc đông cứng: mọi seed của ta \emph{dùng chung} 86M tham số
+giống hệt nhau, chỉ khác 7.3M tham số đầu đọc. Đây là lý do việc thêm seed chỉ cho
+$+0.0008$, và cũng là lý do hướng \emph{ensemble backbone fine-tune độc lập} vẫn còn mở.
+
+\subsubsection*{[B] ML-Decoder --- đầu đọc đa nhãn}
+
+Theo Alibaba-MIIL. Bốn mươi \textbf{class query cố định} (\code{requires\_grad = False},
+đúng bài gốc) cross-attend vào patch token; không có self-attention giữa các query.
+Đầu ra qua \code{GroupFC} --- mỗi lớp một vector trọng số riêng, giảm tham số so với
+Linear đầy đủ.
+
+\begin{Verbatim}[fontsize=\small,frame=single,framesep=2mm]
+q  = class_query[40]                       # cố định, không học
+kv = pin(patch)                            # 768 -> 512
+kv = Tier1(kv, ein(etok))                  # điều biến bởi EHR   [module D]
+h  = XAttn(q, kv)                          # LayerNorm + FFN residual
+logits = GroupFC(h)                        # [B, 40]
+\end{Verbatim}
+
+\subsubsection*{[C] Bộ mã hoá EHR --- \code{ColTokBag}}
+
+Biến bảng EHR thành \textbf{chuỗi token} thay vì một vector phẳng: mỗi cột sinh một
+token riêng ($T_j = b_j + e_j \cdot W_j$), cộng một token tổng hợp và một token túi
+vi khuẩn. Chiều token \code{D\_ETOK = 256}.
+
+\code{MicroBag} xử lý phần vi sinh dạng \emph{ragged} (mỗi study có số vi khuẩn khác
+nhau, trung bình 1.7) bằng \code{EmbeddingBag(mode='sum')}, tránh phải đệm về độ dài
+cố định.
+
+\subsubsection*{[D] \code{Tier1} --- điều kiện hoá bằng EHR ở mức patch}
+
+Đây là đóng góp kiến trúc trung tâm của dự án. Patch làm \textbf{query}, token EHR làm
+key/value --- tức là EHR \emph{điều biến biểu diễn ảnh} trước khi đầu đọc nhìn vào,
+chứ không phải nối vào sau.
+
+\begin{itemize}
+\item Phép chiếu \code{pr} khởi tạo bằng \textbf{không} $\Rightarrow$ tại bước 0 mô hình
+      đúng bằng bản ảnh thuần. Có assert kiểm điều này trước mỗi lượt chạy.
+\item \code{ln\_a} chuẩn hoá \emph{đầu vào} của phép chiếu. Thiếu nó, arm đối chứng ở
+      \code{38d} sụp từ $0.2416$ xuống $0.0681$.
+\end{itemize}
+
+\subsubsection*{[E] \code{Tier1Img} --- phim chụp trước ở mức patch}
+
+Phim trước của cùng bệnh nhân được đưa vào ở mức patch, chạy trong không gian
+\code{D\_CXR} trước phép chiếu \code{pin}. \textbf{Không} trừ thẳng
+$\text{patch} - \text{prior}$ vì hai phim không được đăng ký không gian (tư thế khác,
+độ hít vào khác).
+
+Điểm kỹ thuật đắt giá: zero-init \emph{không} đủ để chặn một nhánh phụ lớn lên quá
+nhanh. AdamW cập nhật khoảng $\text{lr}$ mỗi bước cho mỗi tham số bất kể gradient nhỏ
+thế nào, nên nhánh xuất phát từ 0 vẫn lớn \emph{tuyến tính} theo bước. Đã sụp ba lần,
+luôn ở epoch 2--4 tức ngay sau đỉnh warmup. Bản hiện tại dùng hệ số \textbf{LayerScale}
+$10^{-4}$ có gradient thật, buộc mô hình phải \emph{học} để lớn lên. Ảnh nào không có
+phim trước thì nhánh bị mask đi hẳn (28.7\% số ảnh).
+
+\subsubsection*{[F] Hàm mất mát --- ASL}
+
+Asymmetric Loss với $\gamma_{\text{neg}} = 4$, $\gamma_{\text{pos}} = 0$, clip $0.05$.
+Port nguyên văn, không tự dẫn lại --- một bản tự viết trước đây dùng $p(1-y)$ thay vì
+$x_{\text{neg}} = 1-p$ làm đảo ngược focal ở nhánh âm và sụp từ $0.4036$ xuống $0.2778$,
+mà nhánh dương vẫn đúng nên lỗi ẩn rất lâu.
+
+\subsubsection*{[G] Thành viên thứ hai --- \code{cnn\_full}}
+
+\code{convnextv2\_nano.fcmae\_ft\_in22k\_in1k}, khởi tạo từ trọng số đã pretrain trên
+\textbf{PadChest} (\code{convnextv2\_padchest.pt}), dùng lại nguyên văn
+\code{Tier1}/\code{Tier1Img}/ML-Decoder. Có assert kiểm trọng số khác ImageNet để bắt
+trường hợp file PadChest không tải được.
+
+CNN yếu hơn đường ống ($0.2463$ so với $0.2663$ trên val) nhưng \textbf{sai khác kiểu},
+nên trộn vào vẫn có lợi --- đó là toàn bộ lý do tồn tại của thành viên này.
+
+\subsubsection*{[H] Trộn theo tier}
+
+Ensemble 20 file \code{t1\_prior\_both} $\oplus$ 16 file \code{cnn\_full}, trọng số
+theo tier \code{head 0.40 | medium 0.40 | tail 0.00}, cổng $0.85$. Trọng số được khoá
+từ trước và đã kiểm lại sau R2a: tỉ lệ $r = \text{AP}_{\text{cnn}}/\text{AP}_{\text{ống}}$
+gần như không đổi (head $0.981 \to 0.983$, medium $0.921 \to 0.923$, tail
+$0.640 \to 0.653$), nên trọng số cũ vẫn đúng bối cảnh.
+
+\paragraph{Tail nhận trọng số 0.} Đây là quyết định có chủ ý --- CNN quá yếu ở tail để
+đóng góp. Nghĩa là \textbf{16 nhãn tail hiện không nhận gì từ ensemble}, và đó là một
+trong những dư địa rõ nhất còn lại.
+
+\subsection{Hai arm huấn luyện}
+
+Mỗi lượt huấn luyện chạy song song hai arm dùng \emph{chung một forward backbone},
+nên arm đối chứng gần như miễn phí:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Arm} & \textbf{EHR} & \textbf{Phim trước} & \textbf{Vai trò} \\
+\midrule
+\code{mldec} & không & không & đối chứng ảnh thuần \\
+\code{tpb}   & có    & có    & đường ống chính (\emph{t1\_prior\_both}) \\
+\bottomrule
+\end{tabular}
+\caption{Hiệu số $G_{\text{ctx}} = \code{tpb} - \code{mldec}$ đo trực tiếp đóng góp của
+ngữ cảnh EHR + phim trước, trong cùng một lượt chạy nên không có nhiễu giữa các lượt.}
+\end{table}
+
+\paragraph{Siêu tham số chốt.} $518^2$ $\cdot$ batch $32\times8 = 256$ hiệu dụng $\cdot$
+10 epoch $\cdot$ LR $10^{-3}$ $\cdot$ WD $10^{-2}$ $\cdot$ warmup $5\%$ $\cdot$ clip $5.0$
+$\cdot$ seed 42, 43. Thành viên CNN: batch $48\times6 = 288$, 8 epoch, LR $10^{-4}$.
+
+% =====================================================================
+\section{Các hướng đã đề ra: kết quả và trạng thái}
+% =====================================================================
+
+\subsection{Hướng đã hoàn thành và có lợi}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}l p{4.0cm}ll p{4.6cm}@{}}
+\toprule
+& \textbf{Hướng} & \textbf{NB} & \textbf{Kết quả} & \textbf{Ghi chú} \\
+\midrule
+\XONG &
+\textbf{R2a} --- gộp lát chọn vào train (74\% $\to$ 87\% dữ liệu có nhãn)
+  & 64, 64b & \textbf{+0.0042} test & 8/8 phép so tier dương; CI95 $[+0.0033, +0.0051]$, loại 0 \\
+\addlinespace
+\XONG & Điều kiện hoá EHR ở mức patch (\code{Tier1})
+  & 53, 56 & $G_{\text{ctx}} \approx +0.0115$ & đóng góp ngữ cảnh, đo trong cùng lượt \\
+\addlinespace
+\XONG & Phim trước ở mức patch (\code{Tier1Img})
+  & 44, 45 & dương, nhỏ & LayerScale bắt buộc, nếu không sẽ sụp \\
+\addlinespace
+\XONG & Ensemble 2 kiến trúc, trộn theo tier
+  & 61 & \textbf{+0.0042} & cấu hình triển khai hiện tại \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Chi tiết R2a.} Lát chọn (39{,}086 ảnh) vốn là thước đo để chọn siêu tham số.
+Khi mọi lựa chọn đã khoá, nó hết vai trò và được thu hồi vào train.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+\textbf{Cấu hình} & \textbf{n file} & \textbf{macro} & \textbf{head} & \textbf{medium} & \textbf{tail} \\
+\midrule
+\code{53/r3} đường ống cũ   & 20 & 0.2641 & 0.4758 & 0.1942 & 0.1155 \\
+\code{64/r2a} đường ống R2a & 20 & \textbf{0.2663} & 0.4775 & 0.1958 & \textbf{0.1193} \\
+\code{41e/r1} cnn cũ        & 16 & 0.2435 & 0.4667 & 0.1788 & 0.0739 \\
+\code{64b/r2a} cnn R2a      & 16 & \textbf{0.2463} & 0.4695 & 0.1808 & \textbf{0.0779} \\
+\bottomrule
+\end{tabular}
+\caption{Val, thang tier \emph{cũ} (13/16/11). Đường ống $+0.0022$ macro và $+0.0039$ tail;
+CNN $+0.0028$ macro và $+0.0040$ tail. Cơ chế: thêm $17.8\%$ dữ liệu là thêm $17.8\%$ ca
+dương, mà nhãn hiếm nhất chỉ có khoảng 150 ca dương nên thêm vài chục ca là đáng kể;
+head thì đã bão hoà.}
+\end{table}
+
+\subsection{Hướng đã ĐÓNG}
+\label{sec:closed}
+
+Mỗi dòng dưới đây là một giả thuyết đã bị bác bỏ bằng phép đo, không phải bị bỏ vì hết
+thời gian. Ghi lại đầy đủ vì kết quả âm cũng là thông tin nghiên cứu.
+
+\begin{longtable}{@{}l p{4.3cm}l p{7.3cm}@{}}
+\toprule
+& \textbf{Hướng} & \textbf{NB} & \textbf{Bằng chứng đóng} \\
+\midrule
+\endhead
+\DONG &Deep EHR conditioning (adapter trong block) & 56 &
+$G_{\text{deep}}$ \textbf{âm}, ổn định qua nhiều seed. Điều kiện hoá sâu hơn không tốt hơn. \\
+\addlinespace
+\DONG &Mở băng block 8--11 của backbone & 57 &
+$G_{\text{ft}} = -0.007$ đến $-0.010$, hai seed đồng thuận, arm đối chứng khoẻ. \\
+\addlinespace
+\DONG &cRT / decoupled classifier & 59 &
+Classifier \textbf{đã hội tụ} --- không còn gì để tách ra huấn luyện lại. \\
+\addlinespace
+\DONG &Đa tỉ lệ \code{cnn\_ms} làm hướng chính & 41f, 62 &
+Trượt cổng chính. \code{nb62} giải thích cơ chế: stage 3 \emph{gần rank-1} (hạng hiệu
+dụng $1.1$ trên 320 kênh) nên 1024 khoá gần cộng tuyến, chỉ pha loãng attention. \\
+\addlinespace
+\DONG &Đổi độ phân giải ở \emph{suy luận} & 51 &
+\code{lb672} thêm token nhưng đầu đọc vẫn huấn luyện ở 518 $\Rightarrow$ lệch phân phối,
+$-0.0028$. \\
+\addlinespace
+\DONG &Thêm seed của cùng backbone đông cứng & --- &
+$+0.0008$, dưới sàn nhiễu $0.0007$. \emph{Không} đóng hướng ensemble backbone fine-tune
+độc lập --- đó là phép khác. \\
+\addlinespace
+\DONG &Neural collapse & 62 (C5) & Bác bỏ trực tiếp. \\
+\addlinespace
+\DONG &Toàn bộ chương trình $w = f(r)$ & 61 &
+\textbf{Hiện vật nhiễu chung.} Spearman$(r,\delta) = +0.598$ đo \emph{cùng mẫu}, nhưng
+$+0.136$ với $p = 0.40$ khi đo \emph{khác mẫu}. Cả hai đại lượng cùng chứa
+$\text{AP}_{\text{ống}}$ nên tự sinh tương quan. \\
+\addlinespace
+\DONG &$\rho$ (tương quan dự đoán) làm biến điều kiện & 61 &
+Đo được rất tin cậy ($1.000$) nhưng \textbf{vô thông tin}: Spearman$(\rho,\delta) = +0.017$. \\
+\addlinespace
+\DONG &Quét ensemble 0-GPU (hạng vs xác suất, $w$ theo tier, trọng số epoch, thành viên thứ 3)
+& 67 & Toàn bộ \textbf{$+0.0000$}. Cấu hình khoá $0.40/0.40/0.00$ vẫn tốt nhất ($0.2709$).
+Thêm \code{cnn\_ms} cho $0.2693$, tệ hơn, lần thứ hai. \\
+\addlinespace
+\DONG &Cascade / crop rồi phóng to & 66 &
+Hộp bao chiếm \textbf{79\% diện tích ảnh} $\Rightarrow$ phóng đại thực chỉ $1.06\times$,
+kết quả $+0.0003$ vô nghĩa. Crop bao nhiêu cũng không đủ vì phát hiện trải khắp lồng ngực. \\
+\addlinespace
+\DONG &Attention khu trú làm động cơ cascade & 65 &
+Cổng \emph{qua} nhưng theo hướng ngược: giữ 5\% patch vẫn đạt $0.988/0.964/0.963$,
+giữ 20\% thì tail đạt $1.029$ tức \emph{tốt hơn} lượt đầy đủ. Mô hình không mất dấu vị
+trí, nên cascade không có gì để sửa. \\
+\addlinespace
+\DONG &ViT @1022 làm đường ống chính & 68 &
+Macro $-0.0055$, tail $-0.0138$. Mọi nhãn hại nặng đều là tail, mọi nhãn lợi đều là medium. \\
+\addlinespace
+\DONG &Gắn lại nhãn bằng LLM & 67 &
+Nhãn test \emph{bẩn y hệt} và lỗi parser là hệ thống, nên $P(y'{=}1|x)$ không đơn điệu
+theo $P(y{=}1|x)$. Dạy mô hình đoán đúng sự thật sẽ kéo nó \emph{xa} khỏi thước đo. \\
+\bottomrule
+\end{longtable}
+
+\paragraph{Vì sao ViT thua ở độ phân giải cao.} Bốn mươi class query phải học phân bố
+attention trên $5{,}329$ khoá thay vì $1{,}369$ --- gấp $3.9$ lần. Nhãn có 26{,}000 ca
+dương thì học được; nhãn có 129 ca dương thì \textbf{pha loãng thống kê}. Chỉ dấu phụ:
+$G_{\text{ctx}}$ tụt từ $+0.0115$ xuống $+0.0029$.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+& \textbf{64 @518} & \textbf{68 @1022} & \textbf{chênh} \\
+\midrule
+macro  & 0.2645 & 0.2590 & $-0.0055$ \\
+head   & 0.5593 & 0.5545 & $-0.0048$ \\
+medium & 0.2227 & 0.2256 & $\mathbf{+0.0029}$ \\
+tail   & 0.1379 & 0.1241 & $\mathbf{-0.0138}$ \\
+\bottomrule
+\end{tabular}
+\caption{Nhãn hại nặng nhất: \code{Clavicle Fracture} $-0.0916$ (prevalence $0.065\%$).
+Nhãn lợi nhất: \code{Granuloma} $+0.0484$ ($1.145\%$).}
+\end{table}
+
+\paragraph{Cảnh báo về phạm vi.} Bậc A của \code{nb68} chỉ chạy 3 epoch, 1 seed, $E=6$.
+Đây là phép \emph{sàng}, không phải phép \emph{đóng} tuyệt đối. Phát biểu an toàn: \emph{ở
+cùng ngân sách, ViT không đổi được độ phân giải thành lợi ích}. Việc CNN có làm được hay
+không là câu hỏi riêng, đang chờ \code{nb68b} trả lời.
+
+\subsection{Hướng còn MỞ}
+
+\begin{longtable}{@{}l p{4.1cm}rr p{5.9cm}@{}}
+\toprule
+& \textbf{Hướng} & \textbf{Chi phí} & \textbf{Kỳ vọng} & \textbf{Lý do còn mở} \\
+\midrule
+\endhead
+\MO &\textbf{\code{nb68b}} --- ConvNeXtV2 @1022 & $\sim$17h & ? &
+\textbf{Đã dựng, chờ chạy.} Phép thử trực tiếp giả thuyết CNN phân cấp tận dụng độ phân
+giải tốt hơn ViT lưới phẳng. Table 3 của paper ủng hộ: mọi đội dùng 1024 đều dùng CNN,
+cả hai đội ViT-L đều ở $\leq 512$. \\
+\addlinespace
+\MO &\textbf{PadChest làm nguồn nhãn} cho 4 nhãn tail & $\sim$8h & $+0.005$ &
+Bệnh viện khác (Alicante vs Boston) $\Rightarrow$ không chung bệnh nhân, không rò rỉ test.
+\code{Azygos Lobe} 176 ảnh, \code{Hydropneumothorax} 549, \code{Pneumoperitoneum} 454,
+\code{Kyphosis} 669. Nhãn hiếm nhất của ta có $\sim$150 ca dương $\Rightarrow$ gấp 2--6 lần.
+Ta mới dùng PadChest làm \emph{pretrain}, chưa dùng làm \emph{nguồn nhãn}. \\
+\addlinespace
+\MO &\textbf{Weighted asymmetric loss} & $\sim$13h & $+0.004$ &
+\textbf{5 trên 9 đội đầu bảng dùng}, ta thì chưa --- vẫn dùng ASL trần $\gamma_n{=}4$,
+$\gamma_p{=}0$. Đây là hướng \emph{độ chắc cao nhất} trong danh sách. \\
+\addlinespace
+\MO &K-fold + fine-tune backbone theo từng fold & 35--58h & $+0.010$ &
+Đòn bẩy macro lớn nhất. Cho 86M tham số \emph{khác nhau thật} thay vì dùng chung một
+backbone đông cứng. Đúng công thức vô địch (\emph{fine-tune + ensemble}), và tập chọn
+sạch gấp 6.6 lần. \\
+\addlinespace
+\MO &EHR mở rộng: thủ thuật, thở máy, kiểu nhập viện & $\sim$3.5h (bậc 1--2, 0 GPU) & $+0.002$ &
+\code{Hydropneumothorax} và \code{Pneumomediastinum} có bội số EHR cao nhất nhóm tail
+($4.2\times$, $4.8\times$) nhưng EHR hiện thiếu đúng loại đặc trưng: dẫn lưu màng phổi,
+chọc dịch, đặt nội khí quản, PEEP. Khoảng 15 cột, cùng dạng, cắm thẳng vào
+\code{ColTokBag} không đổi kiến trúc. \\
+\addlinespace
+\MO &Loss thay thế xấp xỉ AP (Smooth-AP) & $\sim$13h & ? &
+Ta đang dùng loss \emph{phân loại} để tối ưu một chỉ số \emph{xếp hạng}. \\
+\addlinespace
+\MO &Chuyên gia TAIL kiểu RIDE & $\sim$13h & ? &
+Khớp sẵn với bộ máy trộn theo tier; tail hiện nhận trọng số 0 từ ensemble. \\
+\addlinespace
+\MO &Sinh ảnh diffusion cho nhãn hiếm & 30--60h & $+0.008$ &
+Nước đi của đội A (hạng 1). \textbf{Phải tự huấn luyện} --- mô hình sinh công khai như
+RoentGen đã fine-tune trên MIMIC-CXR nên đã thấy ảnh test. Thiết kế: nền SD/LAION
+$\to$ fine-tune trên train của ta + PadChest. Độ chắc thấp--vừa. \\
+\addlinespace
+\MO &\code{nb40} --- nhiệm vụ thứ hai (25 CCS phenotype + tử vong) & 1 notebook & --- &
+Không cho mAP, cho \textbf{bài viết}. Biến kết quả âm ở CXR-LT thành phát biểu có biên:
+\emph{EHR không giúp nhãn sinh từ report, giúp rõ nhãn lâm sàng}. \\
+\bottomrule
+\end{longtable}
+
+\paragraph{Ngân sách tổng.} Cộng thô các kỳ vọng cho $+0.034$; trừ chồng lấn khoảng
+$30\%$ còn \textbf{$+0.024$} --- đủ để vượt $0.281$, nhưng chỉ khi phần lớn các hướng
+đều cho đúng kỳ vọng.
+
+% =====================================================================
+\section{Khoảng cách tới mục tiêu}
+% =====================================================================
+
+\subsection{Vị trí hiện tại trên bảng xếp hạng}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}clrrrr@{}}
+\toprule
+\textbf{Hạng} & \textbf{Đội} & \textbf{mAP} & \textbf{Head} & \textbf{Medium} & \textbf{Tail} \\
+\midrule
+1 & A & 0.281 & 0.567 & 0.263 & 0.136 \\
+2 & B & 0.279 & 0.569 & 0.260 & 0.133 \\
+3 & C & 0.277 & 0.570 & 0.253 & 0.136 \\
+4 & D & 0.277 & 0.568 & 0.264 & 0.125 \\
+5 &   & 0.273 & & & \\
+6 &   & 0.269 & & & \\
+\midrule
+\textbf{7--8} & $\blacktriangleright$~\textbf{TA} & \textbf{0.2625} & \textbf{0.5663} & \textbf{0.2286} & \textbf{0.1234} \\
+\bottomrule
+\end{tabular}
+\caption{Bảng xếp hạng Task 1 (paper Table 4 + 5). Khoảng cách hạng 2 đến hạng 4 chỉ là
+$0.004$, nên mức có ý nghĩa công bố là khoảng $0.005$.}
+\end{table}
+
+\subsection{Phân rã khoảng cách theo tier}
+
+Đây là kết quả định hướng quan trọng nhất tuần này --- nó lật ngược giả định
+\emph{``tail là mọi thứ''} mà dự án theo đuổi từ đầu.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+\textbf{Tier} & \textbf{n nhãn} & \textbf{Ta (test)} & \textbf{Đội A} & \textbf{Đóng góp} & \textbf{\%} \\
+\midrule
+head   & 9  & 0.5663 & 0.567 & $+0.0002$ & 1\% \\
+$\blacktriangleright$~\textbf{medium} & 15 & 0.2286 & 0.263 & $\mathbf{+0.0129}$ & \textbf{70\%} \\
+tail   & 16 & 0.1234 & 0.136 & $+0.0050$ & 27\% \\
+\midrule
+\textbf{tổng} & 40 & \textbf{0.2625} & \textbf{0.281} & $\mathbf{0.0185}$ & 100\% \\
+\bottomrule
+\end{tabular}
+\caption{Thang tier \emph{chính thức} (9/15/16). Head đã \textbf{ngang} nhà vô địch. Gần
+như toàn bộ khoảng cách nằm ở medium.}
+\end{table}
+
+\subsection{Bảy nhãn medium ôm trọn khoảng cách}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+\textbf{Nhãn} & \textbf{AP} & \textbf{Prevalence} & \textbf{Chẩn đoán} \\
+\midrule
+Infiltration               & 0.0644 & 3.897\% & prec $0.261$ --- \textbf{nhãn bẩn} \\
+Tortuous Aorta             & 0.0742 & 1.289\% & prec $0.958$ --- nhãn \emph{sạch} \\
+Pleural Thickening         & 0.1248 & 1.264\% & prec $1.000$ --- nhãn \emph{sạch} \\
+Adenopathy                 & 0.1349 & 1.317\% & chưa có số \\
+Calcification of the Aorta & 0.1492 & 1.637\% & prec $1.000$ --- nhãn \emph{sạch} \\
+Fissure                    & 0.1528 & 1.083\% & chưa có số \\
+Granuloma                  & 0.1762 & 1.145\% & chưa có số \\
+\midrule
+\textbf{trung bình} & \textbf{$\sim$0.125} & & 8 nhãn medium còn lại: $\sim$0.36 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Ba nhãn precision 0.958--1.000 mà AP $<0.15$ không phải nhiễu nhãn.} Chúng là
+\textbf{cấu trúc mảnh nằm dưới ngưỡng $9.46$ mm mỗi patch}: \code{Fissure} khoảng 1 mm,
+\code{Pleural Thickening} vài mm, \code{Calcification of the Aorta} cỡ mm. Đây là giới
+hạn \emph{vật lý} của độ phân giải đầu vào, không phải lỗi mô hình --- và nó biện minh
+cho việc tiếp tục theo đuổi \code{nb68b}.
+
+\paragraph{Nếu giải quyết được nhóm này.} Đưa 7 nhãn lên trung vị medium (khoảng $0.25$)
+thì medium đi từ $0.2286$ lên $\sim0.287$, tức \textbf{vượt nhà vô địch} ở tier đó, và
+macro tăng $+0.022$ --- một mình nó đủ để vượt $0.281$.
+
+\subsection{Trần trên và dư địa}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lrl@{}}
+\toprule
+Trần nhiều nhãn (multi-label ceiling) & 0.6528 & ràng buộc \emph{cả} vô địch lẫn ta như nhau \\
+Vị trí của ta so với trần & 40\% & còn rất nhiều dư địa, chỉ là đắt \\
+Sàn nhiễu (lặp lại thật) & 0.0007 & đo từ bản sao \code{41e} \\
+Sàn công bố & 0.005 & khoảng cách hạng 2--4 của giải \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Kỷ luật đo lường}
+
+\begin{itemize}
+\item \textbf{Lát chọn} đã gộp vào train (R2a), không còn tồn tại.
+\item \textbf{Val} giờ là tập chọn hợp lệ --- độc lập với test, nên thiên lệch của nó chỉ
+      hỏng vai trò \emph{thước đo}, không hỏng vai trò \emph{tập chọn}.
+\item \textbf{Test} đã chạm 2 lần (21/08 và 06/09), ghi vào
+      \code{\_test\_touches\_nb61.jsonl}. \textbf{Ngân sách còn 2 lần.}
+\item Điều duy nhất còn cấm: \textbf{chọn TRÊN test}. Cách giữ sạch là chốt danh sách thí
+      nghiệm trước, chọn hết trên val, đọc test \emph{một lượt} và báo cáo \emph{tất cả},
+      kể cả cái thua.
+\end{itemize}
+
+\paragraph{Chuyển giao val $\to$ test, đo được.}
+head $\times 1.002$ $\cdot$ medium $\times 0.976$ $\cdot$ tail $\times 0.882$.
+Nghĩa là chọn trên val ở head và medium (29/40 nhãn, $72.5\%$ macro) thì tin được;
+ở tail thì không. Con số tail thật của ta là $0.0966$ (thang cũ), không phải $0.1193$.
+
+\subsection{Rủi ro đã biết}
+
+\begin{itemize}
+\item \textbf{Đánh giá hồi cứu.} Ta giữ nhãn test, nên đây không phải nộp mù. Thứ thay
+      cho tính mù là kỷ luật chạm test ở trên. \emph{Phải nêu rõ trong bài viết.}
+\item \textbf{\code{nb68b} chưa chạy.} Cell huấn luyện chỉ được kiểm tĩnh; RAM thực tế chỉ
+      xác nhận được khi chạy. Ngân sách DataLoader đã hạ từ 532 GB xuống 18 GB kèm assert
+      chặn trước, sau một lần tràn RAM 176 GB.
+\item \textbf{Nhãn bẩn.} Sáu nhãn có precision thấp trên tập vàng 406 ảnh
+      (\code{Lung Lesion} $0.161$, \code{Pneumonia} $0.191$, \code{Infiltration} $0.261$,
+      \code{Mass} $0.513$, \code{Pneumothorax} $0.563$, \code{Enlarged Cardiomediastinum}
+      $0.583$; trung bình toàn bảng $0.711$). Hướng xử lý là \emph{hạ trọng số loss},
+      không phải gắn lại nhãn.
+\item \textbf{Đường tắt EHR.} Nếu thêm đặc trưng thủ thuật, phải chạy đối chứng tráo ảnh
+      sang bệnh nhân khác giữ nguyên EHR. Nếu AP gần như không đổi thì mô hình đang đọc
+      EHR chứ không đọc phim, và phải báo cáo đúng như vậy.
+\item \textbf{\code{Azygos Lobe} là biến thể giải phẫu bẩm sinh, không phải bệnh} --- nó
+      không nên bị chấm chung thang với nhãn bệnh lý. Cần ghi rõ trong phần Limitations.
+\end{itemize}
+
+\subsection{Thứ tự đề xuất}
+
+\begin{enumerate}
+\item \code{nb68b} --- ConvNeXtV2 @1022. Đã dựng, chỉ cần chạy. Trả lời câu hỏi độ phân
+      giải một cách dứt khoát cho cả hai kiến trúc.
+\item \textbf{Weighted asymmetric loss} --- độ chắc cao nhất, 5/9 đội đầu bảng dùng.
+\item \textbf{PadChest làm nguồn nhãn} --- đòn bẩy tail lớn nhất, chi phí thấp.
+\item EHR mở rộng (bậc 1--2 chạy được không cần GPU, làm song song).
+\item K-fold + backbone theo fold --- đắt nhất nhưng là đòn bẩy macro lớn nhất.
+\end{enumerate}
+
+Chốt các hướng 1--4 trên val, rồi \textbf{đọc test một lượt} cho toàn bảng.
+
+\vspace{6mm}
+\hrule
+\vspace{2mm}
+\footnotesize
+\noindent\textbf{Ghi chú về nguồn.} Ngày 10/09/2026, \code{JOURNAL.md} bị một script ghi
+log xoá trắng (mở file ở chế độ \code{'w'} rồi mới đọc trong cùng biểu thức --- chế độ ghi
+cắt file trước khi lệnh đọc chạy), mất khoảng 183 KB. Lúc đó repo chưa có git nên không
+khôi phục được. Bản hiện tại là \textbf{tái dựng} từ \code{Event.md},
+\code{PLAN\_VUOT\_0281.md}, \code{CHECKLIST\_STAGE5\_OPEN.md} và output còn lưu trong 12
+notebook: số liệu là thật, phần diễn giải cơ chế theo từng ngày đã mất. Repo đã được đưa
+vào git ngay sau sự cố, hiện theo dõi 210 file.
+
+\end{document}

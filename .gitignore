@@ -16,3 +16,12 @@ __pycache__/
 
 # Graphify build
 graphify-out/
+
+# LaTeX phu tro (giu lai .tex va .pdf)
+*.aux
+*.log
+*.toc
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk

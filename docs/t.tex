@@ -1,0 +1,15 @@
+\documentclass{article}
+\usepackage{array}
+\usepackage{colortbl}
+\definecolor{ab}{RGB}{232,244,234}
+\begin{document}
+A: p-column + rowcolor
+\begin{tabular}{@{}p{3cm}l@{}}
+\rowcolor{ab} x & y \
+\end{tabular}
+
+B: no p-column + rowcolor
+\begin{tabular}{@{}ll@{}}
+\rowcolor{ab} x & y \
+\end{tabular}
+\end{document}
