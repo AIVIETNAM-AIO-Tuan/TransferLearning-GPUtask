@@ -1,7 +1,16 @@
 % =====================================================================
 %  BAO CAO TIEN DO — CXR-LT 2024
-%  Bien dich:  xelatex BAO_CAO_TIEN_DO.tex     (khuyen dung)
-%          hoac pdflatex BAO_CAO_TIEN_DO.tex   (can vntex/T5 — co san trong TeX Live)
+%  DICH:   .\build.ps1                       <- cach de nhat, chay 3 luot + nghiem thu
+%          xelatex BAO_CAO_TIEN_DO.tex       <- chay 3 LAN (muc luc + do rong longtable)
+%          pdflatex BAO_CAO_TIEN_DO.tex      <- cung duoc, dung T5/vntex
+%
+%  ⚠ DUNG DUNG `latexmk`: no la script PERL, may nay khong cai Perl nen MiKTeX bao
+%    "could not find the script engine 'perl'". Do KHONG phai loi cua file .tex.
+%    Ca hai engine tren deu da duoc kiem THAT: 0 loi, 10 trang.
+%
+%  ⚠ "critical issue: You are running MiKTeX on an unsupported version of Windows"
+%    chi la loi than phien (MiKTeX 24.1 khong nhan ra Windows 11 build 26200).
+%    PDF van ra dung — cu kiem so trang va so dong "^! " trong .log, dung kiem ma thoat.
 %  Nguon so lieu: JOURNAL.md, Event.md, Progress.md, CHECKLIST_STAGE5_OPEN.md,
 %                 PLAN_VUOT_0281.md, output cua nb61/64/64b/65/66/67/68.
 %  Moi con so trong file nay doc tu log/file, khong go tay tu tri nho.
@@ -120,7 +129,7 @@ mức xác suất đầu ra.
       đông cứng, 1369 patch token          khởi tạo từ PadChest
         |                                   |          |
         |                                   |          |
-  [E] Tier1Img  <-- phim trước ------------ + ---------+
+  [E] Tier1Img  <-- phim X-ray trước đó ------------ + ---------+
         |         (mức patch, LayerScale)   |
   [D] Tier1     <-- token EHR -------------+
         |         (patch = query)           |
