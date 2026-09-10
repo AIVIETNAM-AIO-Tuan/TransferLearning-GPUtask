@@ -1,0 +1,35 @@
+--- KẾT QUẢ XGBOOST (Target: dx_pneumonia) ---
+Optimal Threshold (F3, beta=3): 0.1407
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.96      0.20      0.33      4179
+           1       0.55      0.99      0.70      4090
+
+    accuracy                           0.59      8269
+   macro avg       0.75      0.59      0.51      8269
+weighted avg       0.76      0.59      0.51      8269
+
+
+Top 20 Feature Importance (Gain):
+spec_SPUTUM: 608.78
+spec_BLOOD_CULTURE: 309.78
+spec_MRSA_SCREEN: 73.39
+spec_Rapid_Respiratory_Viral_Screen___Culture: 49.49
+spec_Influenza_A_B_by_DFA: 44.58
+org_KLEBSIELLA_PNEUMONIAE: 44.51
+spec_PLEURAL_FLUID: 40.95
+chiefcomplaint: 33.71
+spec_BRONCHOALVEOLAR_LAVAGE: 32.42
+spec_URINE: 31.44
+org_YEAST: 29.63
+spec_TISSUE: 27.19
+spec_Mini_BAL: 23.39
+org_STREPTOCOCCUS_PNEUMONIAE: 23.13
+org_VIRIDANS_STREPTOCOCCI: 23.11
+img_568: 22.12
+lab_creatinine: 20.86
+spec_JOINT_FLUID: 20.71
+spec_Staph_aureus_swab: 20.29
+vital_spo2: 19.91
