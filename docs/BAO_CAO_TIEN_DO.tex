@@ -76,13 +76,7 @@
 \end{center}
 
 \vspace{2mm}
-\noindent\textit{Mọi con số trong báo cáo được đọc lại từ log và output notebook. Nguồn: }
-\code{JOURNAL.md}, \code{Event.md}, \code{CHECKLIST\_STAGE5\_OPEN.md}, \code{PLAN\_VUOT\_0281.md}.
 
-\renewcommand{\contentsname}{Mục lục}
-\renewcommand{\tablename}{Bảng}
-\tableofcontents
-\newpage
 
 % =====================================================================
 \section{Kiến trúc hiện tại}
@@ -118,11 +112,11 @@ không xuất hiện trong tập 40 nhãn của ta.}
 \paragraph{Phân tầng theo độ hiếm.} Ban tổ chức chia theo \emph{tỉ lệ hiện} trên train:
 head $>10\%$, medium $1$--$10\%$, tail $<1\%$, cho \textbf{9 / 15 / 16} nhãn. Thang riêng
 mà ta dùng trước ngày 08/09 chia theo \emph{số ca} và cho 13 / 16 / 11 --- mọi báo cáo
-tier trước mốc đó dùng thang khác, cần đối chiếu cẩn thận.
+lớp trước mốc đó dùng thang khác, cần đối chiếu cẩn thận.
 
 \subsection{Sơ đồ tổng thể}
 
-Hệ thống là \textbf{ensemble hai thành viên} có kiến trúc khác nhau, trộn theo tier ở
+Hệ thống là \textbf{ensemble hai thành viên} có kiến trúc khác nhau, trộn theo lớp ở
 mức xác suất đầu ra.
 
 \begin{center}
@@ -153,10 +147,10 @@ mức xác suất đầu ra.
 
 % --- hang 3: hai dau doc giong het nhau ---
 \node[head] (HL) at (\xL, -4.75) {\textbf{ĐẦU ĐỌC} \\[-1pt]
-        \scriptsize [E] Tier1Img \\[-2pt] \scriptsize [D] Tier1
+        \scriptsize [E] lớp1Img \\[-2pt] \scriptsize [D] lớp1
         \\[-2pt] \scriptsize [B] ML-Decoder};
 \node[head] (HR) at (\xR, -4.75) {\textbf{ĐẦU ĐỌC} \\[-1pt]
-        \scriptsize [E] Tier1Img \\[-2pt] \scriptsize [D] Tier1
+        \scriptsize [E] lớp1Img \\[-2pt] \scriptsize [D] lớp1
         \\[-2pt] \scriptsize [B] ML-Decoder};
 
 % --- ngu canh o giua, cap cho CA HAI ---
@@ -185,7 +179,7 @@ mức xác suất đầu ra.
 \noindent Hai nhánh dùng \textbf{cùng một mã đầu đọc} nhưng là hai bản sao huấn luyện độc
 lập. Khác biệt thật nằm ở backbone: RAD-DINO \emph{đông cứng} (chỉ 7.3M tham số đầu đọc
 được học), còn ConvNeXtV2 thì \emph{huấn luyện cả backbone}. Thứ tự trong đầu đọc là
-\code{Tier1Img} (phim trước, không gian \code{D\_CXR}) $\to$ \code{pin} $\to$ \code{Tier1}
+\code{lớp1Img} (phim trước, không gian \code{D\_CXR}) $\to$ \code{pin} $\to$ \code{lớp1}
 (token EHR) $\to$ ML-Decoder.
 
 \subsection{Các module}
@@ -216,7 +210,7 @@ Số tham số nhờ vậy giảm bốn mươi lần.
 \begin{Verbatim}[fontsize=\small,frame=single,framesep=2mm]
 q  = class_query[40]                       # cố định, không học
 kv = pin(patch)                            # 768 -> 512
-kv = Tier1(kv, ein(etok))                  # điều biến bởi EHR   [module D]
+kv = lớp1(kv, ein(etok))                  # điều biến bởi EHR   [module D]
 h  = XAttn(q, kv)                          # LayerNorm + FFN residual
 logits = GroupFC(h)                        # [B, 40]
 \end{Verbatim}
@@ -242,7 +236,7 @@ cộng gộp lại thành một token duy nhất, mỗi chủng có trọng số
 cột vi sinh dạng phẳng đã bị loại khỏi bảng để không đếm hai lần.
 
 
-\subsubsection*{[D] \code{Tier1} --- điều kiện hoá bằng EHR ở mức patch}
+\subsubsection*{[D] \code{lớp1} --- điều kiện hoá bằng EHR ở mức patch}
 
 Đây là đóng góp kiến trúc trung tâm của dự án. Patch làm \textbf{query}, token EHR làm
 key/value --- tức là EHR \emph{điều biến biểu diễn ảnh} trước khi đầu đọc nhìn vào,
@@ -255,14 +249,13 @@ chứ không phải nối vào sau.
       \code{38d} sụp từ $0.2416$ xuống $0.0681$.
 \end{itemize}
 
-\subsubsection*{[E] \code{Tier1Img} --- phim chụp trước ở mức patch}
+\subsubsection*{[E] \code{lớp1Img} --- phim chụp trước ở mức patch}
 
 Phim trước của cùng bệnh nhân được đưa vào ở mức patch, chạy trong không gian
 \code{D\_CXR} trước phép chiếu \code{pin}. \textbf{Không} trừ thẳng
 $\text{patch} - \text{prior}$ vì hai phim không được đăng ký không gian (tư thế khác,
 độ hít vào khác).
-
-Điểm kỹ thuật đắt giá: zero-init \emph{không} đủ để chặn một nhánh phụ lớn lên quá
+Zero-init \emph{không} đủ để chặn một nhánh phụ lớn lên quá
 nhanh. AdamW cập nhật khoảng $\text{lr}$ mỗi bước cho mỗi tham số bất kể gradient nhỏ
 thế nào, nên nhánh xuất phát từ 0 vẫn lớn \emph{tuyến tính} theo bước. Đã sụp ba lần,
 luôn ở epoch 2--4 tức ngay sau đỉnh warmup. Bản hiện tại dùng hệ số \textbf{LayerScale}
@@ -272,30 +265,31 @@ phim trước thì nhánh bị mask đi hẳn (28.7\% số ảnh).
 \subsubsection*{[F] Hàm mất mát --- ASL}
 
 Asymmetric Loss với $\gamma_{\text{neg}} = 4$, $\gamma_{\text{pos}} = 0$, clip $0.05$.
-Port nguyên văn, không tự dẫn lại --- một bản tự viết trước đây dùng $p(1-y)$ thay vì
-$x_{\text{neg}} = 1-p$ làm đảo ngược focal ở nhánh âm và sụp từ $0.4036$ xuống $0.2778$,
-mà nhánh dương vẫn đúng nên lỗi ẩn rất lâu.
 
-\subsubsection*{[G] Thành viên thứ hai --- \code{cnn\_full}}
+\subsubsection*{[G] Thành viên thứ hai --- mạng tích chập}
 
-\code{convnextv2\_nano.\allowbreak fcmae\_\allowbreak ft\_\allowbreak in22k\_\allowbreak in1k},
-khởi tạo từ trọng số đã pretrain trên
-\textbf{PadChest} (\code{convnextv2\_padchest.pt}), dùng lại nguyên văn
-\code{Tier1}/\code{Tier1Img}/ML-Decoder. Có assert kiểm trọng số khác ImageNet để bắt
-trường hợp file PadChest không tải được.
+Thành viên thứ hai đổi backbone sang một mạng tích chập cỡ nhỏ, khởi tạo từ trọng số đã
+huấn luyện trước trên \textbf{PadChest} thay vì từ ImageNet. Phần đầu đọc giữ nguyên như
+pipeline chính: vẫn phim chụp trước ở mức patch, vẫn điều kiện hoá bằng EHR, vẫn bốn mươi
+truy vấn lớp. Chỉ backbone là khác, và đó là chủ ý.
 
-CNN yếu hơn đường ống ($0.2463$ so với $0.2663$ trên val) nhưng \textbf{sai khác kiểu},
-nên trộn vào vẫn có lợi --- đó là toàn bộ lý do tồn tại của thành viên này.
+Trước mỗi lượt chạy, trọng số khởi tạo được đối chiếu với bản ImageNet gốc. Nếu hai bên
+trùng khớp thì tệp PadChest đã không được nạp, và lượt chạy dừng lại thay vì âm thầm huấn
+luyện từ khởi tạo sai.
 
-\subsubsection*{[H] Trộn theo tier}
+CNN yếu hơn pipeline với RAD-DINO trước đó ($0.2463$ so với $0.2663$ trên val). Tuy nhiên
+hai kiến trúc khác nhau nên trong quá trình huấn luyện chúng cập nhật theo hàm mất mát
+theo những hướng khác nhau, và khi trộn lại thì sự đa dạng đó bổ sung cho nhau. Đó là lý do một thành viên yếu hơn vẫn làm cả ensemble mạnh lên.
+
+\subsubsection*{[H] Trộn theo lớp}
 
 Ensemble 20 file \code{t1\_prior\_both} $\oplus$ 16 file \code{cnn\_full}, trọng số
-theo tier \code{head 0.40 | medium 0.40 | tail 0.00}, cổng $0.85$. Trọng số được khoá
+theo lớp \code{head 0.40 | medium 0.40 | tail 0.00}, cổng $0.85$. Trọng số được khoá
 từ trước và đã kiểm lại sau R2a: tỉ lệ $r = \text{AP}_{\text{cnn}}/\text{AP}_{\text{ống}}$
 gần như không đổi (head $0.981 \to 0.983$, medium $0.921 \to 0.923$, tail
 $0.640 \to 0.653$), nên trọng số cũ vẫn đúng bối cảnh.
 
-\paragraph{Tail nhận trọng số 0.} Đây là quyết định có chủ ý --- CNN quá yếu ở tail để
+\paragraph{Tail nhận trọng số 0.} Tạm thời giữ nguyên như vậy vì CNN quá yếu ở tail để
 đóng góp. Nghĩa là \textbf{16 nhãn tail hiện không nhận gì từ ensemble}, và đó là một
 trong những dư địa rõ nhất còn lại.
 
@@ -312,7 +306,7 @@ nên arm đối chứng gần như miễn phí:
 \textbf{Arm} & \textbf{EHR} & \textbf{Phim trước} & \textbf{Vai trò} \\
 \midrule
 \code{mldec} & không & không & đối chứng ảnh thuần \\
-\code{tpb}   & có    & có    & đường ống chính (\emph{t1\_prior\_both}) \\
+\code{tpb}   & có    & có    & pipeline chính (\emph{t1\_prior\_both}) \\
 \bottomrule
 \end{tabular}
 \caption{Hiệu số $G_{\text{ctx}} = \code{tpb} - \code{mldec}$ đo trực tiếp đóng góp của
@@ -334,20 +328,20 @@ $\cdot$ seed 42, 43. Thành viên CNN: batch $48\times6 = 288$, 8 epoch, LR $10^
 \small
 \begin{tabular}{@{}l p{4.0cm}ll p{4.6cm}@{}}
 \toprule
-& \textbf{Hướng} & \textbf{NB} & \textbf{Kết quả} & \textbf{Ghi chú} \\
+& \textbf{Hướng} & \textbf{Kết quả} & \textbf{Ghi chú} \\
 \midrule
 \XONG &
 \textbf{R2a} --- gộp lát chọn vào train (74\% $\to$ 87\% dữ liệu có nhãn)
-  & 64, 64b & \textbf{+0.0042} test & 8/8 phép so tier dương; CI95 $[+0.0033, +0.0051]$, loại 0 \\
+ & \textbf{+0.0042} test & 8/8 phép so lớp dương; CI95 $[+0.0033, +0.0051]$, loại 0 \\
 \addlinespace
-\XONG & Điều kiện hoá EHR ở mức patch (\code{Tier1})
-  & 53, 56 & $G_{\text{ctx}} \approx +0.0115$ & đóng góp ngữ cảnh, đo trong cùng lượt \\
+\XONG & Điều kiện hoá EHR ở mức patch (\code{lớp1})
+ & $G_{\text{ctx}} \approx +0.0115$ & đóng góp ngữ cảnh, đo trong cùng lượt \\
 \addlinespace
-\XONG & Phim trước ở mức patch (\code{Tier1Img})
-  & 44, 45 & dương, nhỏ & LayerScale bắt buộc, nếu không sẽ sụp \\
+\XONG & Phim trước ở mức patch (\code{lớp1Img})
+ & dương, nhỏ & LayerScale bắt buộc, nếu không sẽ sụp \\
 \addlinespace
-\XONG & Ensemble 2 kiến trúc, trộn theo tier
-  & 61 & \textbf{+0.0042} & cấu hình triển khai hiện tại \\
+\XONG & Ensemble 2 kiến trúc, trộn theo lớp
+ & \textbf{+0.0042} & cấu hình triển khai hiện tại \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -362,13 +356,13 @@ Khi mọi lựa chọn đã khoá, nó hết vai trò và được thu hồi và
 \toprule
 \textbf{Cấu hình} & \textbf{n file} & \textbf{macro} & \textbf{head} & \textbf{medium} & \textbf{tail} \\
 \midrule
-\code{53/r3} đường ống cũ   & 20 & 0.2641 & 0.4758 & 0.1942 & 0.1155 \\
-\code{64/r2a} đường ống R2a & 20 & \textbf{0.2663} & 0.4775 & 0.1958 & \textbf{0.1193} \\
+\code{53/r3} pipeline cũ   & 20 & 0.2641 & 0.4758 & 0.1942 & 0.1155 \\
+\code{64/r2a} pipeline R2a & 20 & \textbf{0.2663} & 0.4775 & 0.1958 & \textbf{0.1193} \\
 \code{41e/r1} cnn cũ        & 16 & 0.2435 & 0.4667 & 0.1788 & 0.0739 \\
 \code{64b/r2a} cnn R2a      & 16 & \textbf{0.2463} & 0.4695 & 0.1808 & \textbf{0.0779} \\
 \bottomrule
 \end{tabular}
-\caption{Val, thang tier \emph{cũ} (13/16/11). Đường ống $+0.0022$ macro và $+0.0039$ tail;
+\caption{Val, thang lớp \emph{cũ} (13/16/11). pipeline $+0.0022$ macro và $+0.0039$ tail;
 CNN $+0.0028$ macro và $+0.0040$ tail. Cơ chế: thêm $17.8\%$ dữ liệu là thêm $17.8\%$ ca
 dương, mà nhãn hiếm nhất chỉ có khoảng 150 ca dương nên thêm vài chục ca là đáng kể;
 head thì đã bão hoà.}
@@ -380,66 +374,79 @@ head thì đã bão hoà.}
 Mỗi dòng dưới đây là một giả thuyết đã bị bác bỏ bằng phép đo, không phải bị bỏ vì hết
 thời gian. Ghi lại đầy đủ vì kết quả âm cũng là thông tin nghiên cứu.
 
-\begin{longtable}{@{}l p{4.3cm}l p{7.3cm}@{}}
+\begin{longtable}{@{}l p{4.5cm} p{9.2cm}@{}}
 \toprule
-& \textbf{Hướng} & \textbf{NB} & \textbf{Bằng chứng đóng} \\
+& \textbf{Hướng} & \textbf{Bằng chứng đóng} \\
 \midrule
 \endhead
-\DONG &Deep EHR conditioning (adapter trong block) & 56 &
-$G_{\text{deep}}$ \textbf{âm}, ổn định qua nhiều seed. Điều kiện hoá sâu hơn không tốt hơn. \\
+\DONG &Đưa EHR vào sâu trong backbone &
+Đo chênh lệch giữa nhánh có điều kiện hoá sâu và nhánh đối chứng chạy song song: chênh
+lệch \textbf{âm}, lặp lại ổn định qua nhiều seed. Đưa EHR vào sâu kém hơn đưa vào ở đầu đọc. \\
 \addlinespace
-\DONG &Mở băng block 8--11 của backbone & 57 &
-$G_{\text{ft}} = -0.007$ đến $-0.010$, hai seed đồng thuận, arm đối chứng khoẻ. \\
+\DONG &Mở khoá bốn khối trên cùng của backbone &
+Điểm giảm $0.007$ đến $0.010$. Hai seed cho cùng kết luận, và nhánh đối chứng chạy song
+song vẫn khoẻ, nên đây không phải sự cố của một lượt chạy. \\
 \addlinespace
-\DONG &cRT / decoupled classifier & 59 &
-Classifier \textbf{đã hội tụ} --- không còn gì để tách ra huấn luyện lại. \\
+\DONG &Huấn luyện lại riêng tầng phân loại &
+Ý tưởng là tách tầng cuối ra học lại trên dữ liệu đã cân bằng. Đo ra thì tầng này
+\textbf{đã hội tụ}, không còn gì để tách. \\
 \addlinespace
-\DONG &Đa tỉ lệ \code{cnn\_ms} làm hướng chính & 41f, 62 &
-Trượt cổng chính. \code{nb62} giải thích cơ chế: stage 3 \emph{gần rank-1} (hạng hiệu
-dụng $1.1$ trên 320 kênh) nên 1024 khoá gần cộng tuyến, chỉ pha loãng attention. \\
+\DONG &Ghép đặc trưng đa tỉ lệ từ mạng tích chập &
+Trượt cổng. Nguyên nhân đo được ở \code{62}: tầng thứ ba gần như chỉ mang \emph{một}
+chiều thông tin thực (hạng hiệu dụng $1.1$ trên 320 kênh), nên 1024 khoá thêm vào gần
+như trùng nhau và chỉ làm loãng chú ý. \\
 \addlinespace
-\DONG &Đổi độ phân giải ở \emph{suy luận} & 51 &
-\code{lb672} thêm token nhưng đầu đọc vẫn huấn luyện ở 518 $\Rightarrow$ lệch phân phối,
-$-0.0028$. \\
+\DONG &Tăng độ phân giải chỉ ở lúc suy luận &
+Ảnh vào lớn hơn nhưng đầu đọc vẫn là bản đã huấn luyện ở 518. Số lượng vùng ảnh thay đổi
+khiến đầu vào lệch khỏi phân phối lúc huấn luyện: $-0.0028$. \\
 \addlinespace
-\DONG &Thêm seed của cùng backbone đông cứng & --- &
-$+0.0008$, dưới sàn nhiễu $0.0007$. \emph{Không} đóng hướng ensemble backbone fine-tune
-độc lập --- đó là phép khác. \\
+\DONG &Thêm seed trên cùng một backbone đông cứng &
+$+0.0008$, dưới sàn nhiễu $0.0007$. Điều này \emph{không} đóng hướng huấn luyện lại
+backbone độc lập rồi mới trộn --- đó là phép đo khác hẳn. \\
 \addlinespace
-\DONG &Neural collapse & 62 (C5) & Bác bỏ trực tiếp. \\
+\DONG &Hiện tượng co cụm biểu diễn lớp &
+Kiểm trực tiếp giả thuyết biểu diễn của mỗi lớp co về một điểm. Không quan sát thấy. \\
 \addlinespace
-\DONG &Toàn bộ chương trình $w = f(r)$ & 61 &
-\textbf{Hiện vật nhiễu chung.} Spearman$(r,\delta) = +0.598$ đo \emph{cùng mẫu}, nhưng
-$+0.136$ với $p = 0.40$ khi đo \emph{khác mẫu}. Cả hai đại lượng cùng chứa
-$\text{AP}_{\text{ống}}$ nên tự sinh tương quan. \\
+\DONG &Trọng số trộn phụ thuộc chất lượng từng nhãn &
+\textbf{Tương quan giả do nhiễu dùng chung.} Đo hai đại lượng trên \emph{cùng} một tập
+cho tương quan $+0.598$; đo trên hai tập \emph{tách rời} thì tụt còn $+0.136$ với
+$p = 0.40$. Cả hai đại lượng đều chứa điểm của pipeline, nên nhiễu của nó tự sinh ra
+tương quan. \\
 \addlinespace
-\DONG &$\rho$ (tương quan dự đoán) làm biến điều kiện & 61 &
-Đo được rất tin cậy ($1.000$) nhưng \textbf{vô thông tin}: Spearman$(\rho,\delta) = +0.017$. \\
+\DONG &Dùng độ tương đồng giữa hai thành viên làm biến quyết định &
+Đại lượng này đo được rất ổn định, nhưng \textbf{không dự báo được gì}: tương quan của
+nó với mức cải thiện thực tế chỉ $+0.017$. \\
 \addlinespace
-\DONG &Quét ensemble 0-GPU (hạng vs xác suất, $w$ theo tier, trọng số epoch, thành viên thứ 3)
-& 67 & Toàn bộ \textbf{$+0.0000$}. Cấu hình khoá $0.40/0.40/0.00$ vẫn tốt nhất ($0.2709$).
-Thêm \code{cnn\_ms} cho $0.2693$, tệ hơn, lần thứ hai. \\
+\DONG &Bốn cách trộn rẻ, không cần GPU &
+Trung bình thứ hạng thay cho trung bình xác suất, quét lại trọng số theo lớp, cân theo
+chất lượng từng epoch, và thêm thành viên thứ ba. \textbf{Tất cả cho $+0.0000$.} Cấu
+hình đang dùng vẫn tốt nhất ($0.2709$); thêm thành viên thứ ba còn tụt xuống $0.2693$. \\
 \addlinespace
-\DONG &Cascade / crop rồi phóng to & 66 &
-Hộp bao chiếm \textbf{79\% diện tích ảnh} $\Rightarrow$ phóng đại thực chỉ $1.06\times$,
-kết quả $+0.0003$ vô nghĩa. Crop bao nhiêu cũng không đủ vì phát hiện trải khắp lồng ngực. \\
+\DONG &Cắt vùng nghi ngờ rồi phóng to &
+Vùng cắt trung bình chiếm \textbf{79\% diện tích ảnh}, nên độ phóng đại thực chỉ
+$1.06$ lần và kết quả $+0.0003$ không có ý nghĩa. Cắt hẹp hơn cũng không cứu được, vì
+dấu hiệu bệnh trải khắp lồng ngực chứ không gom vào một chỗ. \\
 \addlinespace
-\DONG &Attention khu trú làm động cơ cascade & 65 &
-Cổng \emph{qua} nhưng theo hướng ngược: giữ 5\% patch vẫn đạt $0.988/0.964/0.963$,
-giữ 20\% thì tail đạt $1.029$ tức \emph{tốt hơn} lượt đầy đủ. Mô hình không mất dấu vị
-trí, nên cascade không có gì để sửa. \\
+\DONG &Định vị vùng mô hình đang nhìn &
+Che bớt ảnh, chỉ chừa lại số ít vùng mà mô hình chú ý nhiều nhất. Giữ $5\%$ số vùng vẫn
+đạt $96$--$99\%$ điểm gốc; giữ $20\%$ thì nhóm nhãn hiếm còn \emph{cao hơn} cả lượt dùng
+toàn ảnh. Mô hình không hề nhìn nhầm chỗ --- và điều đó lấy đi luôn lý do tồn tại của
+hướng cắt vùng rồi phóng to. \\
 \addlinespace
-\DONG &ViT @1022 làm đường ống chính & 68 &
-Macro $-0.0055$, tail $-0.0138$. Mọi nhãn hại nặng đều là tail, mọi nhãn lợi đều là medium. \\
+\DONG &Đưa cả pipeline lên độ phân giải 1022 &
+Điểm chung giảm $0.0055$, nhóm nhãn hiếm giảm $0.0138$. Mọi nhãn thiệt hại nặng đều
+thuộc nhóm hiếm, mọi nhãn hưởng lợi đều thuộc nhóm trung bình. \\
 \addlinespace
-\DONG &Gắn lại nhãn bằng LLM & 67 &
-Nhãn test \emph{bẩn y hệt} và lỗi parser là hệ thống, nên $P(y'{=}1|x)$ không đơn điệu
-theo $P(y{=}1|x)$. Dạy mô hình đoán đúng sự thật sẽ kéo nó \emph{xa} khỏi thước đo. \\
+\DONG &Gắn lại nhãn bằng mô hình ngôn ngữ &
+Nhãn của tập test bẩn theo \emph{đúng cùng một kiểu} với nhãn huấn luyện, và lỗi đến từ
+bộ phân tích văn bản nên mang tính hệ thống chứ không ngẫu nhiên. Dạy mô hình đoán đúng
+bệnh thật sẽ kéo nó ra \emph{xa} thước đo đang được chấm. \\
 \bottomrule
 \end{longtable}
 
-\paragraph{Vì sao ViT thua ở độ phân giải cao.} Bốn mươi class query phải học phân bố
-attention trên $5{,}329$ khoá thay vì $1{,}369$ --- gấp $3.9$ lần. Nhãn có 26{,}000 ca
+
+\paragraph{ViT thua ở độ phân giải cao.} Bốn mươi class query phải học phân bố
+attention trên $5{,}329$ Key thay vì $1{,}369$ --- gấp $3.9$ lần. Nhãn có 26{,}000 ca
 dương thì học được; nhãn có 129 ca dương thì \textbf{pha loãng thống kê}. Chỉ dấu phụ:
 $G_{\text{ctx}}$ tụt từ $+0.0115$ xuống $+0.0029$.
 
@@ -460,224 +467,25 @@ tail   & 0.1379 & 0.1241 & $\mathbf{-0.0138}$ \\
 Nhãn lợi nhất: \code{Granuloma} $+0.0484$ ($1.145\%$).}
 \end{table}
 
-\paragraph{Cảnh báo về phạm vi.} Bậc A của \code{nb68} chỉ chạy 3 epoch, 1 seed, $E=6$.
+Khi chạy thí nghiệm về độ phân giải thì mới chỉ chạy 3 epoch, 1 seed, $E=6$.
 Đây là phép \emph{sàng}, không phải phép \emph{đóng} tuyệt đối. Phát biểu an toàn: \emph{ở
-cùng ngân sách, ViT không đổi được độ phân giải thành lợi ích}. Việc CNN có làm được hay
+cùng mức chi phí, ViT không đổi được độ phân giải thành lợi ích}. Việc CNN có làm được hay
 không là câu hỏi riêng, đang chờ \code{nb68b} trả lời.
 
 \subsection{Hướng còn MỞ}
 
-\begin{longtable}{@{}l p{4.1cm}rr p{5.9cm}@{}}
+\begin{center}
+\begin{tabular}{@{}l l r@{}}
 \toprule
-& \textbf{Hướng} & \textbf{Chi phí} & \textbf{Kỳ vọng} & \textbf{Lý do còn mở} \\
+& \textbf{Hướng} \\
 \midrule
-\endhead
-\MO &\textbf{\code{nb68b}} --- ConvNeXtV2 @1022 & $\sim$17h & ? &
-\textbf{Đã dựng, chờ chạy.} Phép thử trực tiếp giả thuyết CNN phân cấp tận dụng độ phân
-giải tốt hơn ViT lưới phẳng. Table 3 của paper ủng hộ: mọi đội dùng 1024 đều dùng CNN,
-cả hai đội ViT-L đều ở $\leq 512$. \\
-\addlinespace
-\MO &\textbf{PadChest làm nguồn nhãn} cho 4 nhãn tail & $\sim$8h & $+0.005$ &
-Bệnh viện khác (Alicante vs Boston) $\Rightarrow$ không chung bệnh nhân, không rò rỉ test.
-\code{Azygos Lobe} 176 ảnh, \code{Hydropneumothorax} 549, \code{Pneumoperitoneum} 454,
-\code{Kyphosis} 669. Nhãn hiếm nhất của ta có $\sim$150 ca dương $\Rightarrow$ gấp 2--6 lần.
-Ta mới dùng PadChest làm \emph{pretrain}, chưa dùng làm \emph{nguồn nhãn}. \\
-\addlinespace
-\MO &\textbf{Weighted asymmetric loss} & $\sim$13h & $+0.004$ &
-\textbf{5 trên 9 đội đầu bảng dùng}, ta thì chưa --- vẫn dùng ASL trần $\gamma_n{=}4$,
-$\gamma_p{=}0$. Đây là hướng \emph{độ chắc cao nhất} trong danh sách. \\
-\addlinespace
-\MO &K-fold + fine-tune backbone theo từng fold & 35--58h & $+0.010$ &
-Đòn bẩy macro lớn nhất. Cho 86M tham số \emph{khác nhau thật} thay vì dùng chung một
-backbone đông cứng. Đúng công thức vô địch (\emph{fine-tune + ensemble}), và tập chọn
-sạch gấp 6.6 lần. \\
-\addlinespace
-\MO &EHR mở rộng: thủ thuật, thở máy, kiểu nhập viện & $\sim$3.5h & $+0.002$ &
-\emph{Bậc 1--2 không cần GPU.}
-\code{Hydropneumothorax} và \code{Pneumomediastinum} có bội số EHR cao nhất nhóm tail
-($4.2\times$, $4.8\times$) nhưng EHR hiện thiếu đúng loại đặc trưng: dẫn lưu màng phổi,
-chọc dịch, đặt nội khí quản, PEEP. Khoảng 15 cột, cùng dạng, cắm thẳng vào
-\code{ColTokBag} không đổi kiến trúc. \\
-\addlinespace
-\MO &Loss thay thế xấp xỉ AP (Smooth-AP) & $\sim$13h & ? &
-Ta đang dùng loss \emph{phân loại} để tối ưu một chỉ số \emph{xếp hạng}. \\
-\addlinespace
-\MO &Chuyên gia TAIL kiểu RIDE & $\sim$13h & ? &
-Khớp sẵn với bộ máy trộn theo tier; tail hiện nhận trọng số 0 từ ensemble. \\
-\addlinespace
-\MO &Sinh ảnh diffusion cho nhãn hiếm & 30--60h & $+0.008$ &
-Nước đi của đội A (hạng 1). \textbf{Phải tự huấn luyện} --- mô hình sinh công khai như
-RoentGen đã fine-tune trên MIMIC-CXR nên đã thấy ảnh test. Thiết kế: nền SD/LAION
-$\to$ fine-tune trên train của ta + PadChest. Độ chắc thấp--vừa. \\
-\addlinespace
-\MO &\code{nb40} --- nhiệm vụ thứ hai (25 CCS phenotype + tử vong) & 1 notebook & --- &
-Không cho mAP, cho \textbf{bài viết}. Biến kết quả âm ở CXR-LT thành phát biểu có biên:
-\emph{EHR không giúp nhãn sinh từ report, giúp rõ nhãn lâm sàng}. \\
-\bottomrule
-\end{longtable}
-
-\paragraph{Ngân sách tổng.} Cộng thô các kỳ vọng cho $+0.034$; trừ chồng lấn khoảng
-$30\%$ còn \textbf{$+0.024$} --- đủ để vượt $0.281$, nhưng chỉ khi phần lớn các hướng
-đều cho đúng kỳ vọng.
-
-% =====================================================================
-\section{Khoảng cách tới mục tiêu}
-% =====================================================================
-
-\subsection{Vị trí hiện tại trên bảng xếp hạng}
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{@{}clrrrr@{}}
-\toprule
-\textbf{Hạng} & \textbf{Đội} & \textbf{mAP} & \textbf{Head} & \textbf{Medium} & \textbf{Tail} \\
-\midrule
-1 & A & 0.281 & 0.567 & 0.263 & 0.136 \\
-2 & B & 0.279 & 0.569 & 0.260 & 0.133 \\
-3 & C & 0.277 & 0.570 & 0.253 & 0.136 \\
-4 & D & 0.277 & 0.568 & 0.264 & 0.125 \\
-5 &   & 0.273 & & & \\
-6 &   & 0.269 & & & \\
-\midrule
-\textbf{7--8} & $\blacktriangleright$~\textbf{TA} & \textbf{0.2625} & \textbf{0.5663} & \textbf{0.2286} & \textbf{0.1234} \\
+\MO & \textbf{\code{nb68b}} --- ConvNeXtV2 @1022  \\
+\MO & \textbf{Weighted asymmetric loss}  \\
+\MO & K-fold + fine-tune backbone theo từng fold  \\
+\MO & Sinh ảnh diffusion cho nhãn hiếm \\
 \bottomrule
 \end{tabular}
-\caption{Bảng xếp hạng Task 1 (paper Table 4 + 5). Khoảng cách hạng 2 đến hạng 4 chỉ là
-$0.004$, nên mức có ý nghĩa công bố là khoảng $0.005$.}
-\end{table}
+\end{center}
 
-\subsection{Phân rã khoảng cách theo tier}
-
-Đây là kết quả định hướng quan trọng nhất tuần này --- nó lật ngược giả định
-\emph{``tail là mọi thứ''} mà dự án theo đuổi từ đầu.
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{@{}lrrrrr@{}}
-\toprule
-\textbf{Tier} & \textbf{n nhãn} & \textbf{Ta (test)} & \textbf{Đội A} & \textbf{Đóng góp} & \textbf{\%} \\
-\midrule
-head   & 9  & 0.5663 & 0.567 & $+0.0002$ & 1\% \\
-$\blacktriangleright$~\textbf{medium} & 15 & 0.2286 & 0.263 & $\mathbf{+0.0129}$ & \textbf{70\%} \\
-tail   & 16 & 0.1234 & 0.136 & $+0.0050$ & 27\% \\
-\midrule
-\textbf{tổng} & 40 & \textbf{0.2625} & \textbf{0.281} & $\mathbf{0.0185}$ & 100\% \\
-\bottomrule
-\end{tabular}
-\caption{Thang tier \emph{chính thức} (9/15/16). Head đã \textbf{ngang} nhà vô địch. Gần
-như toàn bộ khoảng cách nằm ở medium.}
-\end{table}
-
-\subsection{Bảy nhãn medium ôm trọn khoảng cách}
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{@{}lrrl@{}}
-\toprule
-\textbf{Nhãn} & \textbf{AP} & \textbf{Prevalence} & \textbf{Chẩn đoán} \\
-\midrule
-Infiltration               & 0.0644 & 3.897\% & prec $0.261$ --- \textbf{nhãn bẩn} \\
-Tortuous Aorta             & 0.0742 & 1.289\% & prec $0.958$ --- nhãn \emph{sạch} \\
-Pleural Thickening         & 0.1248 & 1.264\% & prec $1.000$ --- nhãn \emph{sạch} \\
-Adenopathy                 & 0.1349 & 1.317\% & chưa có số \\
-Calcification of the Aorta & 0.1492 & 1.637\% & prec $1.000$ --- nhãn \emph{sạch} \\
-Fissure                    & 0.1528 & 1.083\% & chưa có số \\
-Granuloma                  & 0.1762 & 1.145\% & chưa có số \\
-\midrule
-\textbf{trung bình} & \textbf{$\sim$0.125} & & 8 nhãn medium còn lại: $\sim$0.36 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\paragraph{Ba nhãn precision 0.958--1.000 mà AP $<0.15$ không phải nhiễu nhãn.} Chúng là
-\textbf{cấu trúc mảnh nằm dưới ngưỡng $9.46$ mm mỗi patch}: \code{Fissure} khoảng 1 mm,
-\code{Pleural Thickening} vài mm, \code{Calcification of the Aorta} cỡ mm. Đây là giới
-hạn \emph{vật lý} của độ phân giải đầu vào, không phải lỗi mô hình --- và nó biện minh
-cho việc tiếp tục theo đuổi \code{nb68b}.
-
-\paragraph{Nếu giải quyết được nhóm này.} Đưa 7 nhãn lên trung vị medium (khoảng $0.25$)
-thì medium đi từ $0.2286$ lên $\sim0.287$, tức \textbf{vượt nhà vô địch} ở tier đó, và
-macro tăng $+0.022$ --- một mình nó đủ để vượt $0.281$.
-
-\subsection{Trần trên và dư địa}
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{@{}lrl@{}}
-\toprule
-Trần nhiều nhãn (multi-label ceiling) & 0.6528 & ràng buộc \emph{cả} vô địch lẫn ta như nhau \\
-Vị trí của ta so với trần & 40\% & còn rất nhiều dư địa, chỉ là đắt \\
-Sàn nhiễu (lặp lại thật) & 0.0007 & đo từ bản sao \code{41e} \\
-Sàn công bố & 0.005 & khoảng cách hạng 2--4 của giải \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Kỷ luật đo lường}
-
-\begin{itemize}
-\item \textbf{Lát chọn} đã gộp vào train (R2a), không còn tồn tại.
-\item \textbf{Val} giờ là tập chọn hợp lệ --- độc lập với test, nên thiên lệch của nó chỉ
-      hỏng vai trò \emph{thước đo}, không hỏng vai trò \emph{tập chọn}.
-\item \textbf{Test} đã chạm 2 lần (21/08 và 06/09), ghi vào
-      \code{\_test\_touches\_nb61.jsonl}. \textbf{Ngân sách còn 2 lần.}
-\item Điều duy nhất còn cấm: \textbf{chọn TRÊN test}. Cách giữ sạch là chốt danh sách thí
-      nghiệm trước, chọn hết trên val, đọc test \emph{một lượt} và báo cáo \emph{tất cả},
-      kể cả cái thua.
-\end{itemize}
-
-\paragraph{Chuyển giao val $\to$ test, đo được.}
-head $\times 1.002$ $\cdot$ medium $\times 0.976$ $\cdot$ tail $\times 0.882$.
-Nghĩa là chọn trên val ở head và medium (29/40 nhãn, $72.5\%$ macro) thì tin được;
-ở tail thì không. Con số tail thật của ta là $0.0966$ (thang cũ), không phải $0.1193$.
-
-\subsection{Rủi ro đã biết}
-
-\begin{itemize}
-\item \textbf{Đánh giá hồi cứu.} Ta giữ nhãn test, nên đây không phải nộp mù. Thứ thay
-      cho tính mù là kỷ luật chạm test ở trên. \emph{Phải nêu rõ trong bài viết.}
-\item \textbf{\code{nb68b} chưa chạy.} Cell huấn luyện chỉ được kiểm tĩnh; RAM thực tế chỉ
-      xác nhận được khi chạy. Ngân sách DataLoader đã hạ từ 532 GB xuống 18 GB kèm assert
-      chặn trước, sau một lần tràn RAM 176 GB.
-\item \textbf{Nhãn bẩn.} Sáu nhãn có precision thấp trên tập vàng 406 ảnh
-      (\code{Lung Lesion} $0.161$, \code{Pneumonia} $0.191$, \code{Infiltration} $0.261$,
-      \code{Mass} $0.513$, \code{Pneumothorax} $0.563$, \code{Enlarged Cardiomediastinum}
-      $0.583$; trung bình toàn bảng $0.711$). Hướng xử lý là \emph{hạ trọng số loss},
-      không phải gắn lại nhãn.
-\item \textbf{Đường tắt EHR.} Nếu thêm đặc trưng thủ thuật, phải chạy đối chứng tráo ảnh
-      sang bệnh nhân khác giữ nguyên EHR. Nếu AP gần như không đổi thì mô hình đang đọc
-      EHR chứ không đọc phim, và phải báo cáo đúng như vậy.
-\item \textbf{\code{Azygos Lobe} là biến thể giải phẫu bẩm sinh, không phải bệnh} --- nó
-      không nên bị chấm chung thang với nhãn bệnh lý. Cần ghi rõ trong phần Limitations.
-\end{itemize}
-
-\subsection{Thứ tự đề xuất}
-
-\begin{enumerate}
-\item \code{nb68b} --- ConvNeXtV2 @1022. Đã dựng, chỉ cần chạy. Trả lời câu hỏi độ phân
-      giải một cách dứt khoát cho cả hai kiến trúc.
-\item \textbf{Weighted asymmetric loss} --- độ chắc cao nhất, 5/9 đội đầu bảng dùng.
-\item \textbf{PadChest làm nguồn nhãn} --- đòn bẩy tail lớn nhất, chi phí thấp.
-\item EHR mở rộng (bậc 1--2 chạy được không cần GPU, làm song song).
-\item K-fold + backbone theo fold --- đắt nhất nhưng là đòn bẩy macro lớn nhất.
-\end{enumerate}
-
-Chốt các hướng 1--4 trên val, rồi \textbf{đọc test một lượt} cho toàn bảng.
-
-\vspace{6mm}
-\hrule
-\vspace{2mm}
-\footnotesize
-\noindent\textbf{Ghi chú về nguồn.} Ngày 10/09/2026, \code{JOURNAL.md} bị một script ghi
-log xoá trắng (mở file ở chế độ \code{'w'} rồi mới đọc trong cùng biểu thức --- chế độ ghi
-cắt file trước khi lệnh đọc chạy), mất khoảng 183 KB. Lúc đó repo chưa có git nên không
-khôi phục được. Bản hiện tại là \textbf{tái dựng} từ \code{Event.md},
-\code{PLAN\_VUOT\_0281.md}, \code{CHECKLIST\_STAGE5\_OPEN.md} và output còn lưu trong 12
-notebook: số liệu là thật, phần diễn giải cơ chế theo từng ngày đã mất. Repo đã được đưa
-vào git ngay sau sự cố, hiện theo dõi 210 file.
 
 \end{document}
