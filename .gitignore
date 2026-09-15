@@ -9,6 +9,9 @@
 *.tar
 *.tar.gz
 
+# Report van ban MIMIC-CXR — 227,835 file .txt, tai ve 17/07, khong dua vao git
+mimic-cxr-reports/
+
 # Rac Python / Jupyter
 __pycache__/
 *.pyc
