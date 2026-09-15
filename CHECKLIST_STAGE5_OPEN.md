@@ -1,5 +1,11 @@
 # CHECKLIST — hướng còn mở, hướng đã đóng
 
+> ⚠ **ĐÃ THAY THẾ (2026-09-15) bởi .** File này lập 06/09, khi test
+> còn  và khoảng cách . Từ đó đã có: bản vá 40 cột XGB, thành viên
+> CNN @1022, và chạm test lần 3 (, khoảng cách ). Giữ lại làm lịch sử —
+> **đừng dùng file này để quyết định.**
+
+
 *Lập 2026-09-06, sau khi `R2a` (`64`/`64b`) xong và chạm test lần 2.*
 *Nguồn: JOURNAL.md, PLAN_STAGE4/STAGE5, và các phiên thảo luận chưa kịp ghi.*
 
