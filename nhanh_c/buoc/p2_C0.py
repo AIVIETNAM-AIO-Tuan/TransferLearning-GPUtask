@@ -11,6 +11,20 @@
 #      nay o stage4_nb84 (TM_BB) ----
 assert isinstance(globals().get('CAU_HINH_C'), dict) and CAU_HINH_C.get('nhanh') == 'C', 'chay qua nhanh_c.buoc(...) (dat CAU_HINH_C) -> DUNG'
 TM_BB = CAU_HINH_C['tm_x']
+# ---- nhanh C (Tuan 29/10 "sao cu de no bao loi nay hoai"): CHAN TAI GOC OSError [Errno 9] Bad file descriptor khi tat worker DataLoader
+#      (Python 3.13): luong nap cua multiprocessing.queues.Queue TU bat loi roi goi traceback.print_exc() - KHONG qua threading.excepthook nen
+#      bo loc C4a khong chan duoc (cach chan nhu CHAN_RAC_81 cua experiments/81_jca_hai_luong/dung_81.py). Bo qua DUNG EBADF; loi khac VAN in.
+#      Dat DAU C0 (truoc moi DataLoader) -> worker fork ve sau thua ke; tham so mac dinh -> van chay sau %reset cua o chuyen phan ----
+import errno as _errno_c, multiprocessing.queues as _mpq_c
+if not getattr(_mpq_c.Queue._on_queue_feeder_error, '_bo_ebadf_c', False):
+    def _feeder_c(e, obj, _goc=_mpq_c.Queue._on_queue_feeder_error, _ebadf=_errno_c.EBADF):
+        if isinstance(e, OSError) and e.errno == _ebadf:
+            return
+        _goc(e, obj)
+    _feeder_c._bo_ebadf_c = True
+    _mpq_c.Queue._on_queue_feeder_error = staticmethod(_feeder_c)
+    del _feeder_c
+del _errno_c, _mpq_c
 import logging as _logging_rac, os as _os_rac, sys as _sys_rac, warnings as _warnings_rac
 for _k_rac, _v_rac in (('HF_HUB_DISABLE_IMPLICIT_TOKEN', '1'), ('HF_HUB_VERBOSITY', 'error'), ('HF_HUB_DISABLE_PROGRESS_BARS', '1')):
     _os_rac.environ.setdefault(_k_rac, _v_rac)
