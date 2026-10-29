@@ -41,7 +41,7 @@ def buoc(ten, ns, seed, thu=False):
                          'Restart session roi chay lai tu dau notebook.')
     p = os.path.join(_GOC, 'buoc', ten + '.py')
     with open(p, 'rb') as f:
-        b = f.read()
+        b = f.read().replace(b'\r\n', b'\n')     # git autocrlf (Windows) doi LF -> CRLF luc checkout: so + chay tren noi dung LF
     if hashlib.sha256(b).hexdigest() != BAM[ten]:
         raise RuntimeError(f'nhanh_c: {p} KHAC ban sinh (sha256) -> tai lai goi dung commit ghim')
     ns['CAU_HINH_C'] = cfg
