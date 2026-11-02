@@ -10,35 +10,46 @@
 
        import nhanh_c as NC; NC.buoc('p1_C0', globals(), seed=43)
 
-   buoc() chay tep trong namespace notebook (globals()) -> nhu chay o: bien xem duoc sau o, %reset cua o chuyen phan xoa dung namespace do."""
+   buoc() chay tep trong namespace notebook (globals()) -> nhu chay o: bien xem duoc sau o, %reset cua o chuyen phan xoa dung namespace do.
+
+   Bien the Cg (Tuan 02/11; docs/SPEC_SAU_78Y.md B.2ae): gradient qua embeddings + block 0-7 cua 5 o CHI qua skip; notebook goi
+   NC.buoc('g1_C0', globals(), seed=43, bien_the='Cg'). Moi bien the CHI chay buoc trong thu tu cua no (thu_tu.PHAN / PHAN_CG)."""
 import hashlib
 import os
 
-from .cau_hinh import PHIEN_BAN, SEEDS, cau_hinh
-from .thu_tu import BAM, PHAN
+from .cau_hinh import BIEN_THE, PHIEN_BAN, SEEDS, cau_hinh
+from .thu_tu import BAM, PHAN, PHAN_CG
 
 _GOC = os.path.dirname(os.path.abspath(__file__))
+_PHAN_BT = {'C': PHAN, 'Cg': PHAN_CG}
+assert tuple(_PHAN_BT) == BIEN_THE
 
 
-def ds_buoc(phan=None):
-    '''Ten buoc theo thu tu notebook: phan 1 / 2 / 3, hoac tat ca (phan=None; ke ca o chuyen phan).'''
+def ds_buoc(phan=None, bien_the='C'):
+    '''Ten buoc theo thu tu notebook cua bien the: phan 1 / 2 / 3, hoac tat ca (phan=None; ke ca o chuyen phan).'''
+    if bien_the not in _PHAN_BT:
+        raise ValueError(f'nhanh_c: bien the {bien_the!r} khong hop le (can mot trong {BIEN_THE})')
+    P = _PHAN_BT[bien_the]
     if phan is None:
-        return [t for k in sorted(PHAN) for t in PHAN[k]]
-    return list(PHAN[phan])
+        return [t for k in sorted(P) for t in P[k]]
+    return list(P[phan])
 
 
-def buoc(ten, ns, seed, thu=False):
-    '''Chay buoc `ten` trong namespace `ns` (globals() cua notebook) cho `seed`. Dat ns['CAU_HINH_C'] = cau_hinh(seed, thu); namespace dang
-       mang cau hinh KHAC (seed / thu) -> dung (khong tron hai luot trong mot phien).'''
+def buoc(ten, ns, seed, thu=False, bien_the='C'):
+    '''Chay buoc `ten` trong namespace `ns` (globals() cua notebook) cho `seed` (+ bien the). Dat ns['CAU_HINH_C'] = cau_hinh(seed, thu,
+       bien_the); namespace dang mang cau hinh KHAC (seed / thu / bien the) -> dung (khong tron hai luot trong mot phien). Buoc KHONG thuoc
+       thu tu cua bien the -> KeyError (vd p1_C6 cua C trong notebook Cg: thieu luot gradient thu hai).'''
     if ten not in BAM:
         raise KeyError(f'nhanh_c: khong co buoc {ten!r} (co {len(BAM)} buoc: {", ".join(sorted(BAM))})')
     if not isinstance(ns, dict):
         raise TypeError('nhanh_c: ns phai la dict globals() cua notebook')
-    cfg = cau_hinh(seed, thu)
+    if ten not in ds_buoc(bien_the=bien_the):
+        raise KeyError(f'nhanh_c: buoc {ten!r} KHONG thuoc bien the {bien_the!r} (thu tu: {", ".join(ds_buoc(bien_the=bien_the))})')
+    cfg = cau_hinh(seed, thu, bien_the)
     cu = ns.get('CAU_HINH_C')
     if cu is not None and cu != cfg:
-        raise ValueError(f"nhanh_c: namespace dang mang luot seed {cu.get('seed')} thu={cu.get('thu')} - KHAC seed {seed} thu={thu}. "
-                         'Restart session roi chay lai tu dau notebook.')
+        raise ValueError(f"nhanh_c: namespace dang mang luot seed {cu.get('seed')} thu={cu.get('thu')} bien the {cu.get('bien_the', 'C')} - "
+                         f'KHAC seed {seed} thu={thu} bien the {bien_the}. Restart session roi chay lai tu dau notebook.')
     p = os.path.join(_GOC, 'buoc', ten + '.py')
     with open(p, 'rb') as f:
         b = f.read().replace(b'\r\n', b'\n')     # git autocrlf (Windows) doi LF -> CRLF luc checkout: so + chay tren noi dung LF
