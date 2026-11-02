@@ -13,15 +13,18 @@
    buoc() chay tep trong namespace notebook (globals()) -> nhu chay o: bien xem duoc sau o, %reset cua o chuyen phan xoa dung namespace do.
 
    Bien the Cg (Tuan 02/11; docs/SPEC_SAU_78Y.md B.2ae): gradient qua embeddings + block 0-7 cua 5 o CHI qua skip; notebook goi
-   NC.buoc('g1_C0', globals(), seed=43, bien_the='Cg'). Moi bien the CHI chay buoc trong thu tu cua no (thu_tu.PHAN / PHAN_CG)."""
+   NC.buoc('g1_C0', globals(), seed=43, bien_the='Cg'). Moi bien the CHI chay buoc trong thu tu cua no (thu_tu.PHAN / PHAN_CG / PHAN_B).
+
+   Bien the B (Tuan 02/11; docs/SPEC_SAU_78Y.md B.2ah): cong thuc skip7 s42 (dau J 1 view luc train) theo seed, ghep cap voi C cung seed; notebook
+   goi NC.buoc('b1_C0', globals(), seed=43, bien_the='B')."""
 import hashlib
 import os
 
 from .cau_hinh import BIEN_THE, PHIEN_BAN, SEEDS, cau_hinh
-from .thu_tu import BAM, PHAN, PHAN_CG
+from .thu_tu import BAM, PHAN, PHAN_B, PHAN_CG
 
 _GOC = os.path.dirname(os.path.abspath(__file__))
-_PHAN_BT = {'C': PHAN, 'Cg': PHAN_CG}
+_PHAN_BT = {'C': PHAN, 'Cg': PHAN_CG, 'B': PHAN_B}
 assert tuple(_PHAN_BT) == BIEN_THE
 
 

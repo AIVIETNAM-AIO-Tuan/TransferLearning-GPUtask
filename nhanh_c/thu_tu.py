@@ -101,7 +101,66 @@ PHAN_CG = {
  ]
 }   # bien the Cg (Tuan 02/11; docs/SPEC_SAU_78Y.md B.2ae)
 PHAN_CG = {int(k): tuple(v) for k, v in PHAN_CG.items()}
+PHAN_B = {
+ "1": [
+  "b1_C0",
+  "p1_C1",
+  "p1_C2",
+  "p1_C3",
+  "b1_C4",
+  "p1_C4A",
+  "p1_C4B",
+  "p1_C5",
+  "b1_C6",
+  "b1_C7",
+  "b1_C9",
+  "chuyen_1_2"
+ ],
+ "2": [
+  "b2_C0",
+  "z_C1",
+  "z_C2",
+  "b_C2B",
+  "z_C2C",
+  "z_c3",
+  "z_C3B",
+  "z_C3C",
+  "z_C4",
+  "z_c5",
+  "z_C5B",
+  "p2_C6",
+  "p2_C7",
+  "p2_C9",
+  "chuyen_2_3"
+ ],
+ "3": [
+  "b3_C0",
+  "z_C1",
+  "z_C2",
+  "b_C2B",
+  "z_C2C",
+  "z_c3",
+  "z_C3B",
+  "z_C3C",
+  "z_C4",
+  "z_c5",
+  "z_C5B",
+  "p3_C6S",
+  "b3_QUYET",
+  "p3_C9S"
+ ]
+}   # bien the B (Tuan 02/11; docs/SPEC_SAU_78Y.md B.2ah)
+PHAN_B = {int(k): tuple(v) for k, v in PHAN_B.items()}
 BAM = {
+ "b1_C0": "5c3a0ba851ad49f9f760a6c5e669378f45298b6ccce43301044bc7cc5ebf5ba4",
+ "b1_C4": "2cc51dce45a70ce4673bb40c1adef3d6f7c2e68cf0303b04bfa1b4762451bddb",
+ "b1_C6": "3151775a50ae743384cd9406821267f98362f316d55c4fca24c590fc8edbda64",
+ "b1_C7": "d9a3d1fc755d0083ea20552a2093a96911649948a235eaecd212f9e39cea7836",
+ "b1_C9": "14ba0bc1da1b3967995cba1953fa6a62df7f6ffa7483e6707915bf73479ceee4",
+ "b2_C0": "5fcddd31549024d3bfadf797593dd43b263015d568bca663a116311bc3f3c71e",
+ "b3_C0": "0046dee9ca304b275a2cb0c354a03806c9fbe1b37d0d6c9052ef553addf39e5f",
+ "b3_QUYET": "7386c4a8a71c39966f406d326d7022909cd5887db40ee3822d21a14364a86055",
+ "b_C2B": "1fd2d2e31adab2f46ca542b5dc77793a387e811349456ffbe89ac778834a9357",
  "chuyen_1_2": "6da4490622d917f44fec3519cdee4bc3c34bd219a8257635358b090edae0aaf0",
  "chuyen_2_3": "3f5e6fa037daa0653a8969fb1c5b89cecf781bdab5a51ee0192154d1e1033379",
  "g1_C0": "2544415d5e1103d5fa53448f41bae2403bf39ab900fcae6a63a62c4e2b011352",
