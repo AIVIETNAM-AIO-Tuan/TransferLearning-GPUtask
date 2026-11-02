@@ -847,12 +847,20 @@ NGUON_BB = dict(duong=[TM_BB, BB_RUN], tep=BB_TEP, ep=EP_BB, luot=LUOT_78Y, id=_
                 so_ban=len(_ds_bb), cau_hinh=(dict(tep='backbone_ft.pt', id=_ds_cf[0]['id'], md5=_ds_cf[0]['md5']) if _ds_cf else None))
 NGUON_BB['chon_ep'] = CHON_EP_C   # nhanh C: cach chon epoch vao nguon_backbone.json (Phan 3 doi chieu)
 # CUNG luot 78y phai CUNG backbone: lan dau ghi nguon_backbone.json; phien sau (resume) so md5 -> khac -> DUNG (KHONG tron hai backbone)
+def _bo_id_c(x):
+    '''nhanh C (02/11): so NOI DUNG, bo moi khoa 'id' long nhau - ID Drive doi khi tep duoc chep sang tai khoan khac (31/10), md5 giu nguyen.'''
+    if isinstance(x, dict): return {k: _bo_id_c(v) for k, v in x.items() if k != 'id'}
+    if isinstance(x, list): return [_bo_id_c(v) for v in x]
+    return x
+
+
 _p_nbb = tim_moi_noi('nguon_backbone.json')
 if _p_nbb:
     with open(_p_nbb) as _f_nbb: _nbb_cu = json.load(_f_nbb)
-    assert _nbb_cu.get('md5') == NGUON_BB['md5'] and _nbb_cu.get('cau_hinh') == NGUON_BB['cau_hinh'], (
-        f"luot {RUN_TAG} da chay voi backbone md5 {_nbb_cu.get('md5')} KHAC ban moi nhat {NGUON_BB['md5']} (78x {BB_RUN} chay lai?) "
-        '-> doi RUN_TAG (luot moi), KHONG tron hai backbone')
+    _lech_nbb = {k: (_bo_id_c(_nbb_cu.get(k)), _bo_id_c(NGUON_BB.get(k))) for k in ('md5', 'cau_hinh')
+                 if _bo_id_c(_nbb_cu.get(k)) != _bo_id_c(NGUON_BB.get(k))}
+    assert not _lech_nbb, (f"luot {RUN_TAG} da chay voi backbone / cau hinh KHAC ban moi nhat (so NOI DUNG = md5, bo ID Drive): {_lech_nbb} "
+                           f"(78x {BB_RUN} chay lai?) -> doi RUN_TAG (luot moi), KHONG tron hai backbone")
 else:
     ghi('nguon_backbone.json', lambda q: ghi_json(q, NGUON_BB))
 print(f"78y: backbone {TM_BB}/{BB_RUN}/{BB_TEP} -> {BB_SRC} (md5 {NGUON_BB['md5']}, {len(_ds_bb)} ban)"
