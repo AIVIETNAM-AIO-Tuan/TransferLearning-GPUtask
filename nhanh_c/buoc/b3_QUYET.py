@@ -15,29 +15,32 @@ assert CAU_HINH_C.get('bien_the') == 'B' and DAU_QD_S == _Q_B['dau'] and all(d i
 
 
 def _nap_gop_b(du, s):
-    '''{dau: p_gopA} cua luot o thu muc du (seed s); THIEU tep -> None (luot chua xong Phan 3).'''
+    '''{dau: p_gopA} cua luot o thu muc du (seed s) - CHI dau CO tep; THIEU dau quyet dinh -> None (luot chua xong Phan 3). Dau bao kem thieu
+       -> bo qua (Tuan 03/11 "tam thoi bo qua fus_tb_hr": luot goi o cat C s42 chi gop mldec_hr / fus_attn_hr / fus_attn_hr_o, KHONG fus_tb_hr).'''
     kk = kiem_ke(tuple(du), mau=r'p_gopA_[a-z_]+_s\d+\.npy')[1]
     out = {}
     for d in DAU_S:
         ds = kk.get(f'p_gopA_{d}_s{s}.npy') or []
-        if not ds: return None
+        if not ds: continue
         if xung_dot(ds): print(f"  ! {'/'.join(du)}/p_gopA_{d}_s{s}.npy: {len(ds)} ban NOI DUNG KHAC -> dung ban MOI NHAT ({ds[0]['mt']})")
         out[d] = np.load(tai(ds[0])).astype('float32')
         assert out[d].shape == np.asarray(_pvA[d]).shape and np.isfinite(out[d]).all(), f"{'/'.join(du)} {d} s{s}: sai hinh / khong huu han -> DUNG"
-    return out
+    return out if _Q_B['dau'] in out else None
 
 
 _PB_B, _CHUA_B = {}, []
 for _s_b in _SS_B:
     _ng_b = _Q_B['nguon'][str(_s_b)]
     _pc_b = _nap_gop_b(_ng_b['C'], _s_b)
-    assert _pc_b is not None, f"thieu p_gopA cua C s{_s_b} ({'/'.join(_ng_b['C'])}) -> DUNG"
+    assert _pc_b is not None, f"thieu p_gopA_{_Q_B['dau']}_s{_s_b}.npy cua C s{_s_b} ({'/'.join(_ng_b['C'])}) -> DUNG"
     _pb_b = {d: np.asarray(_pvA[d], 'float32') for d in DAU_S} if _s_b == int(SEED) else _nap_gop_b(_ng_b['B'], _s_b)
     if _pb_b is None:                                                # luot B seed kia chua xong Phan 3 -> bo qua, in ten
         _CHUA_B.append(_s_b); continue
     _PB_B[_s_b] = dict(B=_pb_b, C=_pc_b)
 SD_B = sorted(_PB_B)
-KQ_B = {(s, b, d): _so3(_gop_v(_PB_B[s][b][d])) for s in SD_B for b in ('B', 'C') for d in DAU_S}
+DAU_CO_B = {s: [d for d in DAU_S if d in _PB_B[s]['B'] and d in _PB_B[s]['C']] for s in SD_B}      # dau co ca B lan C (dau quyet dinh: luon co)
+_THIEU_DAU_B = [f'{b} s{s} {d}' for s in SD_B for b in ('B', 'C') for d in DAU_S if d not in _PB_B[s][b]]
+KQ_B = {(s, b, d): _so3(_gop_v(_PB_B[s][b][d])) for s in SD_B for b in ('B', 'C') for d in DAU_CO_B[s]}
 for _s_b in SD_B:
     for _b_b in ('B', 'C'):
         _m_b = _Q_B['nguon'][str(_s_b)].get(f'moc_{_b_b}')
@@ -45,7 +48,7 @@ for _s_b in SD_B:
         assert abs(KQ_B[(_s_b, _b_b, _Q_B['dau'])]['toan'] - float(_m_b)) < float(_Q_B['tol_moc']), (
             f"cong: {_b_b} s{_s_b} {_Q_B['dau']} gop tinh lai {KQ_B[(_s_b, _b_b, _Q_B['dau'])]['toan']:.4f} KHAC moc {_m_b} -> DUNG")
 assert abs(KQ_B[(int(SEED), 'B', _Q_B['dau'])]['toan'] - KQ_S[(_Q_B['dau'], _KA)]['toan']) < 1e-9, 'QUYET DINH B: so cua luot nay KHAC bang C6S -> DUNG'
-CHENH_B = {(s, d): {f: KQ_B[(s, 'C', d)][f] - KQ_B[(s, 'B', d)][f] for f in ('toan', 'nua_A', 'nua_B')} for s in SD_B for d in DAU_S}
+CHENH_B = {(s, d): {f: KQ_B[(s, 'C', d)][f] - KQ_B[(s, 'B', d)][f] for f in ('toan', 'nua_A', 'nua_B')} for s in SD_B for d in DAU_CO_B[s]}
 D_B = {f: float(np.mean([CHENH_B[(s, _Q_B['dau'])][f] for s in SD_B])) for f in ('toan', 'nua_A', 'nua_B')}
 D_TIER_B = {t: float(np.mean([KQ_B[(s, 'C', _Q_B['dau'])]['tier'][t] - KQ_B[(s, 'B', _Q_B['dau'])]['tier'][t] for s in SD_B]))
             for t in ('head', 'medium', 'tail')}
@@ -128,15 +131,16 @@ else:
     print(f"LUAT (Claude de xuat 02/11, cho Tuan duyet): D <= +{_Q_B['bien']} -> B KHONG KEM C; D >= +{_Q_B['nguong_c']} VA > 0 o CA HAI nua -> C HON B; "
           f"con lai -> CHUA RO | D = {D_B['toan']:+.4f} -> {PHAN_XU_B}")
 print('bao kem (KHONG vao luat), C - B tung seed: ' + ' | '.join(
-    f'{d}: ' + ' '.join(f"s{s} {CHENH_B[(s, d)]['toan']:+.4f}" for s in SD_B) for d in DAU_S if d != _Q_B['dau'])
-      + ' | CI chi do nhieu chon benh nhan (KHONG do nhieu seed ~0.001-0.002)')
+    f'{d}: ' + ' '.join(f"s{s} {CHENH_B[(s, d)]['toan']:+.4f}" if (s, d) in CHENH_B else f"s{s} -" for s in SD_B) for d in DAU_S if d != _Q_B['dau'])
+      + ' | CI chi do nhieu chon benh nhan (KHONG do nhieu seed ~0.001-0.002)'
+      + (f" | bo qua (thieu tep p_gopA, Tuan 03/11): {', '.join(_THIEU_DAU_B)}" if _THIEU_DAU_B else ''))
 _ts_b = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 ghi(f'quyet_dinh_b_s{SEED}_{_ts_b}.json', lambda q: ghi_json(q, dict(
     t=_ts_b, seed=SEED, dau=_Q_B['dau'], seeds=_SS_B, seed_co=SD_B, seed_chua=_CHUA_B, bien=_Q_B['bien'], nguong_c=_Q_B['nguong_c'],
     ket_qua={f's{s} | {b} | {d}': v for (s, b, d), v in KQ_B.items()}, chenh={f's{s} | {d}': v for (s, d), v in CHENH_B.items()}, D=D_B, D_tier=D_TIER_B,
     ci95={k: list(v) for k, v in CI_B.items()}, n_boot=_n_bs_b, hat=_Q_B['hat'], n_rut_du_lop=N_DUNG_B, lop_thieu={LAB40[j]: n for j, n in _thieu_b.items()},
-    phan_xu=PHAN_XU_B, nguon=_Q_B['nguon'],
+    phan_xu=PHAN_XU_B, nguon=_Q_B['nguon'], dau_thieu=_THIEU_DAU_B,
     luat=(f"{_Q_B['dau']} gop trong so ep1-10, D = TB (C - B) cac seed {_SS_B}: D <= {_Q_B['bien']} -> B KHONG KEM C; D >= {_Q_B['nguong_c']} va > 0 o "
           "ca hai nua -> C HON B; con lai CHUA RO (Claude de xuat 02/11, cho Tuan duyet; Event 2026-11-02)"))))
 print(f"da ghi quyet_dinh_b_s{SEED}_{_ts_b}.json (len Drive o C9S). KHONG doc nhan test.")
-del _SS_B, _PB_B, _CHUA_B, _s_b, _ng_b, _pc_b, _pb_b, _b_b, _m_b, _G_B, _TT_B, _a1_b, _bn_b, _inv_b, _rng_b, _t0_b, _n_bs_b, _thieu_b, _ds_b, _r_b, _c_b, _ts_b
+del _SS_B, _PB_B, _CHUA_B, _s_b, _ng_b, _pc_b, _pb_b, _b_b, _m_b, _G_B, _TT_B, _a1_b, _bn_b, _inv_b, _rng_b, _t0_b, _n_bs_b, _thieu_b, _ds_b, _r_b, _c_b, _ts_b, _THIEU_DAU_B
