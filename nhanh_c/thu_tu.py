@@ -151,6 +151,57 @@ PHAN_B = {
  ]
 }   # bien the B (Tuan 02/11; docs/SPEC_SAU_78Y.md B.2ah)
 PHAN_B = {int(k): tuple(v) for k, v in PHAN_B.items()}
+PHAN_BG = {
+ "1": [
+  "bg1_C0",
+  "p1_C1",
+  "p1_C2",
+  "p1_C3",
+  "bg1_C4",
+  "bg1_C4G",
+  "p1_C4A",
+  "p1_C4B",
+  "p1_C5",
+  "bg1_C6",
+  "bg1_C7",
+  "bg1_C9",
+  "chuyen_1_2"
+ ],
+ "2": [
+  "bg2_C0",
+  "z_C1",
+  "z_C2",
+  "bg_C2B",
+  "z_C2C",
+  "z_c3",
+  "z_C3B",
+  "z_C3C",
+  "z_C4",
+  "z_c5",
+  "z_C5B",
+  "p2_C6",
+  "p2_C7",
+  "p2_C9",
+  "chuyen_2_3"
+ ],
+ "3": [
+  "bg3_C0",
+  "z_C1",
+  "z_C2",
+  "bg_C2B",
+  "z_C2C",
+  "z_c3",
+  "z_C3B",
+  "z_C3C",
+  "z_C4",
+  "z_c5",
+  "z_C5B",
+  "p3_C6S",
+  "bg3_QUYET",
+  "p3_C9S"
+ ]
+}   # bien the Bg (Tuan duyet 04/11; docs/SPEC_SAU_78Y.md B.2ai)
+PHAN_BG = {int(k): tuple(v) for k, v in PHAN_BG.items()}
 BAM = {
  "b1_C0": "5c3a0ba851ad49f9f760a6c5e669378f45298b6ccce43301044bc7cc5ebf5ba4",
  "b1_C4": "2cc51dce45a70ce4673bb40c1adef3d6f7c2e68cf0303b04bfa1b4762451bddb",
@@ -161,6 +212,16 @@ BAM = {
  "b3_C0": "0046dee9ca304b275a2cb0c354a03806c9fbe1b37d0d6c9052ef553addf39e5f",
  "b3_QUYET": "3f2fa93b45aef33c7b8fdb61108b9b192d4ee0b63e096f8c16c880c778db5ca7",
  "b_C2B": "1fd2d2e31adab2f46ca542b5dc77793a387e811349456ffbe89ac778834a9357",
+ "bg1_C0": "912c1073c45834ba7222438a272dd00ce3077ada9d511d805efe9629a24aba95",
+ "bg1_C4": "f875bef409f0b8e69cfb44cfd6da5a4b6ce3accf3f836bbd511af1687e4dbd25",
+ "bg1_C4G": "63970e008ba365e91a979ecb36f4af6e7e6bc65e2fbbeb06baacdf027357bfc7",
+ "bg1_C6": "756396eb8f5e5f2ff25361e511f2a1a0a685cc9114b59c37a4c1d4535360dc64",
+ "bg1_C7": "3403bfd14d2950b4c47ba6edb205692d6b2e94a3efd2e6332a3f9b3d553f364f",
+ "bg1_C9": "b43534fd3e13d6c5f35bcec4be20139a6cfcb82ac7b49677a1dde13578c34423",
+ "bg2_C0": "46c4757a22553b40fd7e2ce3183cbb26d429aa71b050b75366cdc41cecc25828",
+ "bg3_C0": "e3379936c82675bc59ecf910d1a7e83eb3dfa63af0efd5c75b68e7fdd0c10b5b",
+ "bg3_QUYET": "3b35dc01d4a74924de00322125b36557c028ac7fe33f29f88084d4ae319205f3",
+ "bg_C2B": "25f54261f9ad58322ce7d40a9916fe2398fdfb4fac2487b6766a252ef9b2ea15",
  "chuyen_1_2": "6da4490622d917f44fec3519cdee4bc3c34bd219a8257635358b090edae0aaf0",
  "chuyen_2_3": "3f5e6fa037daa0653a8969fb1c5b89cecf781bdab5a51ee0192154d1e1033379",
  "g1_C0": "2544415d5e1103d5fa53448f41bae2403bf39ab900fcae6a63a62c4e2b011352",
