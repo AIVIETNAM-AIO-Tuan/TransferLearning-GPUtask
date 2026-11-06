@@ -15,7 +15,7 @@ NGUONG_SUC_KHOE = 0.01                           # Phan 1: TB VAL trong luot ep1
 
 # ---- bien the Cg (Tuan 02/11; docs/SPEC_SAU_78Y.md B.2ae; PLAN A.4w): gradient qua embeddings + block 0-7 cua 5 o CHI qua skip; ghep cap
 #      voi C CUNG seed (cung thu tu lo / khoi dong / lambda). Moc C cung seed = so da in o C9 (TB VAL EMA ep1-6) / C6S (gop trong so) ----
-BIEN_THE = ('C', 'Cg', 'B', 'Bg')
+BIEN_THE = ('C', 'Cg', 'B', 'Bg', 'Bd')
 SEEDS_CG = (43, 44)
 MOC_C_SEED = {43: dict(tb_p1=0.2616, gop=0.2870), 44: dict(tb_p1=0.2602, gop=0.2867), 45: dict(tb_p1=0.2642, gop=0.2874), 46: dict(tb_p1=0.2601, gop=0.2889)}
 CFG_GRAD_O7 = dict(phien_ban='g_o7_v1', duong='skip', tang_cuoi=7, embeddings=True, khuc=48)
@@ -25,11 +25,11 @@ QUYET_CG = dict(dau='fus_attn_hr', nguong=0.003, n_boot=2000, hat=22101, tol_moc
 #      BO_O7 + skip block 7 -> 8; dau J 1 view) theo seed; ghep cap voi C CUNG seed (thu tu lo / khoi dong / lambda), backbone doc o CUNG epoch C da
 #      chon. Suc khoe so voi B s42 (cung cong thuc). Moc = so da in o notebook da chay (C9 / C6S / C10 cua luot skip7) ----
 SEEDS_B = (43, 44)
-MOC_B_S42 = dict(x=('stage4_nb78x', 'r78x_J_v3b_dp_ema_v2_skip7_s42'), gts=('stage4_nb78z', 'r78z_Jv3b_dp_ema_v2_skip7_s42_gts'), gop=0.2883,
+MOC_B_S42 = dict(x=('stage4_nb78x', 'r78x_J_v3b_dp_ema_v2_skip7_s42'), z=('stage4_nb78z', 'r78z_Jv3b_dp_ema_v2_skip7_s42'),
+                 gts=('stage4_nb78z', 'r78z_Jv3b_dp_ema_v2_skip7_s42_gts'), gop=0.2883,
                  tb_p1=0.2625)
-EP_KHOA_B = {43: 5, 44: 5, 45: 5, 46: 5}   # = EP_BB C cung seed da chon (C0 Phan 2 cua C s43-s46 in 'EP_BB = 5'); b2_C0 doi chieu nguon_backbone.json cua C
+EP_KHOA_B = {43: 5, 44: 5}      # = EP_BB C cung seed da chon (C0 Phan 2 cua C s43 / s44 in 'EP_BB = 5'); b2_C0 doi chieu nguon_backbone.json cua C
 QUYET_B = dict(dau='fus_attn_hr', seeds=(42, 43, 44), bien=0.002, nguong_c=0.003, n_boot=2000, hat=22101, tol_moc=5e-4)
-SEEDS_B_MR = (45, 46)           # Tuan 06/11 (cong thuc B da chot 04/11): them 2 seed; CUNG buoc B, bang QUYET 5 cap - quyet dinh B / C da khep o 3 seed
 
 # ---- bien the Bg (Tuan duyet 04/11; docs/SPEC_SAU_78Y.md B.2ai; PLAN A.4y): cong thuc B + gradient qua embeddings + block 0-7 cua 5 o CHI qua
 #      skip (nhu Cg); ghep cap voi B CUNG seed (thu tu lo / khoi dong / lambda), backbone doc o CUNG epoch B da chon. Moc B cung seed = so da in o
@@ -39,10 +39,16 @@ MOC_B_SEED = {43: dict(tb_p1=0.2628, gop=0.2887), 44: dict(tb_p1=0.2622, gop=0.2
 EP_KHOA_BG = {44: 5}            # = EP_BB B cung seed (b3_C0 B s44 in 'EP_BB = 5' = dinh trong luot cua B s44); bg2_C0 doi chieu nguon_backbone.json cua B
 QUYET_BG = dict(QUYET_CG)       # luat CUNG dang Cg (Tuan duyet 04/11): Bg - B cung seed >= +0.003 toan val VA > 0 o CA HAI nua
 
+# ---- bien the Bd (Tuan 06/11; docs/SPEC_SAU_78Y.md B.2aj; PLAN A.4z): cong thuc B chay DOC LAP nhu C: KHONG ghep cap / khoa epoch theo C cung seed (C s45 / s46
+#      da mat cung tai khoan bi xoa), backbone KHOA ep5 nhu B s42-s44 (Tuan 06/11; dinh VAL trong luot chi in tham khao), Phan 3 tong hop cac seed co tep. RUN_TAG CUNG ten r84x_B_s<seed>.
+#      So da in = so o notebook da chay ----
+SEEDS_BD = (45, 46)
+EP_CO_DINH_BD = 5
+
 
 def ten_luot(seed, bien_the='C'):
     '''RUN_TAG ba phan cua mot seed (thu muc TM); bien the Cg -> r84x_Cg_s<seed> ..., B -> r84x_B_s<seed> ..., Bg -> r84x_Bg_s<seed> ...'''
-    p = {'C': 'C', 'Cg': 'Cg', 'B': 'B', 'Bg': 'Bg'}[bien_the]
+    p = {'C': 'C', 'Cg': 'Cg', 'B': 'B', 'Bg': 'Bg', 'Bd': 'B'}[bien_the]
     return dict(run_x=f'r84x_{p}_s{seed}', run_z=f'r84z_{p}_s{seed}', run_gts=f'r84z_{p}_s{seed}_gts')
 
 
@@ -56,14 +62,11 @@ def _nguon_b():
     return out
 
 
-def _nguon_b5():
-    '''Nguon p_gopA cua 5 cap cung seed (B s45 / s46): nhu _nguon_b + moc B s43 / s44 (da xong) + cap s45 / s46 (moc_B None: luot moi, chua co so).'''
-    out = _nguon_b()
-    for s in SEEDS_B:
-        out[str(s)]['moc_B'] = MOC_B_SEED[s]['gop']
-    for s in SEEDS_B_MR:
-        out[str(s)] = dict(B=[TM, ten_luot(s, 'B')['run_gts']], C=[TM, ten_luot(s)['run_gts']], moc_B=None, moc_C=MOC_C_SEED[s]['gop'])
-    return out
+def _nguon_bd(s):
+    if s == 42:
+        return dict(z=list(MOC_B_S42['z']), gts=list(MOC_B_S42['gts']))
+    t = ten_luot(s, 'Bd')
+    return dict(z=[TM, t['run_z']], gts=[TM, t['run_gts']])
 
 
 def _nguon_seed(s):
@@ -84,8 +87,10 @@ def cau_hinh(seed, thu=False, bien_the='C'):
         raise ValueError(f'nhanh C: bien the {bien_the!r} khong hop le (can mot trong {BIEN_THE})')
     if bien_the == 'Cg' and seed not in SEEDS_CG:
         raise ValueError(f'nhanh C bien the Cg: seed {seed!r} khong hop le (can mot trong {SEEDS_CG}: C cung seed da xong)')
-    if bien_the == 'B' and seed not in SEEDS_B + SEEDS_B_MR:
-        raise ValueError(f'nhanh C bien the B: seed {seed!r} khong hop le (can mot trong {SEEDS_B + SEEDS_B_MR}: C cung seed da xong)')
+    if bien_the == 'B' and seed not in SEEDS_B:
+        raise ValueError(f'nhanh C bien the B: seed {seed!r} khong hop le (can mot trong {SEEDS_B}: C cung seed da xong)')
+    if bien_the == 'Bd' and seed not in SEEDS_BD:
+        raise ValueError(f'nhanh C bien the Bd: seed {seed!r} khong hop le (can mot trong {SEEDS_BD})')
     if bien_the == 'Bg' and seed not in SEEDS_BG:
         raise ValueError(f'nhanh C bien the Bg: seed {seed!r} khong hop le (can mot trong {SEEDS_BG}: B cung seed da xong)')
     cfg = dict(nhanh='C', phien_ban=PHIEN_BAN, seed=seed, thu=thu, seeds=list(SEEDS), tm=TM, tm_x=TM, **ten_luot(seed, bien_the),
@@ -94,13 +99,17 @@ def cau_hinh(seed, thu=False, bien_the='C'):
                              a_s42=dict(gts=list(MOC_A_S42['gts']), moc_gop=MOC_A_S42['gop'])))
     if bien_the == 'C':
         return cfg
+    if bien_the == 'Bd':
+        cfg.update(bien_the='Bd', nhan_sk='B s42', ep_co_dinh=EP_CO_DINH_BD, moc_x=list(MOC_B_S42['x']), suc_khoe=dict(moc_tb=MOC_B_S42['tb_p1'], nguong=NGUONG_SUC_KHOE),
+                   tong_hop=dict(seeds=list(SEEDS), nguon={str(s): _nguon_bd(s) for s in SEEDS}, moc_s42_gop=MOC_B_S42['gop'],
+                                 a_s42=dict(gts=list(MOC_A_S42['gts']), moc_gop=MOC_A_S42['gop']),
+                                 so_da_in=dict(B={'42': MOC_B_S42['gop'], **{str(s): MOC_B_SEED[s]['gop'] for s in SEEDS_B}}, C=[MOC_C_S42['gop']] + [MOC_C_SEED[s]['gop'] for s in (43, 44, 45, 46)])))
+        return cfg
     c_seed = ten_luot(seed)                                       # C CUNG seed (doi chung ghep cap, CHI doc)
     if bien_the == 'B':
         cfg.update(bien_the='B', nhan_sk='B s42', moc_x=list(MOC_B_S42['x']), suc_khoe=dict(moc_tb=MOC_B_S42['tb_p1'], nguong=NGUONG_SUC_KHOE),
                    nhan_moc=f'C s{seed}', seed_moc=seed, ghep_cap_x=[TM, c_seed['run_x']],
-                   ep_khoa=dict(ep=EP_KHOA_B[seed], nguon_c=[TM, c_seed['run_z']]),
-                   quyet=(dict(QUYET_B, seeds=list(QUYET_B['seeds']), nguon=_nguon_b()) if seed in SEEDS_B
-                          else dict(QUYET_B, seeds=list(QUYET_B['seeds'] + SEEDS_B_MR), nguon=_nguon_b5())))
+                   ep_khoa=dict(ep=EP_KHOA_B[seed], nguon_c=[TM, c_seed['run_z']]), quyet=dict(QUYET_B, seeds=list(QUYET_B['seeds']), nguon=_nguon_b()))
         return cfg
     if bien_the == 'Bg':
         b_seed = ten_luot(seed, 'B')                              # B CUNG seed (doi chung ghep cap, CHI doc); khoa ep_khoa giu ten nguon_c nhu B

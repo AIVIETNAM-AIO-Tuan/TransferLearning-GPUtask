@@ -19,15 +19,18 @@
    goi NC.buoc('b1_C0', globals(), seed=43, bien_the='B').
 
    Bien the Bg (Tuan duyet 04/11; docs/SPEC_SAU_78Y.md B.2ai): cong thuc B + gradient qua embeddings + block 0-7 cua 5 o CHI qua skip (nhu Cg),
-   ghep cap voi B cung seed; notebook goi NC.buoc('bg1_C0', globals(), seed=44, bien_the='Bg')."""
+   ghep cap voi B cung seed; notebook goi NC.buoc('bg1_C0', globals(), seed=44, bien_the='Bg').
+
+   Bien the Bd (Tuan 06/11; docs/SPEC_SAU_78Y.md B.2aj): cong thuc B chay DOC LAP nhu C (khong ghep cap C, backbone khoa ep5 nhu B s42-s44); notebook goi
+   NC.buoc('bd1_C0', globals(), seed=45, bien_the='Bd')."""
 import hashlib
 import os
 
 from .cau_hinh import BIEN_THE, PHIEN_BAN, SEEDS, cau_hinh
-from .thu_tu import BAM, PHAN, PHAN_B, PHAN_BG, PHAN_CG
+from .thu_tu import BAM, PHAN, PHAN_B, PHAN_BD, PHAN_BG, PHAN_CG
 
 _GOC = os.path.dirname(os.path.abspath(__file__))
-_PHAN_BT = {'C': PHAN, 'Cg': PHAN_CG, 'B': PHAN_B, 'Bg': PHAN_BG}
+_PHAN_BT = {'C': PHAN, 'Cg': PHAN_CG, 'B': PHAN_B, 'Bg': PHAN_BG, 'Bd': PHAN_BD}
 assert tuple(_PHAN_BT) == BIEN_THE
 
 

@@ -202,6 +202,56 @@ PHAN_BG = {
  ]
 }   # bien the Bg (Tuan duyet 04/11; docs/SPEC_SAU_78Y.md B.2ai)
 PHAN_BG = {int(k): tuple(v) for k, v in PHAN_BG.items()}
+PHAN_BD = {
+ "1": [
+  "bd1_C0",
+  "p1_C1",
+  "p1_C2",
+  "p1_C3",
+  "bd1_C4",
+  "p1_C4A",
+  "p1_C4B",
+  "p1_C5",
+  "bd1_C6",
+  "bd1_C7",
+  "bd1_C9",
+  "chuyen_1_2"
+ ],
+ "2": [
+  "bd2_C0",
+  "z_C1",
+  "z_C2",
+  "bd_C2B",
+  "z_C2C",
+  "z_c3",
+  "z_C3B",
+  "z_C3C",
+  "z_C4",
+  "z_c5",
+  "z_C5B",
+  "p2_C6",
+  "p2_C7",
+  "p2_C9",
+  "chuyen_2_3"
+ ],
+ "3": [
+  "bd3_C0",
+  "z_C1",
+  "z_C2",
+  "bd_C2B",
+  "z_C2C",
+  "z_c3",
+  "z_C3B",
+  "z_C3C",
+  "z_C4",
+  "z_c5",
+  "z_C5B",
+  "p3_C6S",
+  "bd3_TONG_HOP",
+  "p3_C9S"
+ ]
+}   # bien the Bd (Tuan 06/11; docs/SPEC_SAU_78Y.md B.2aj)
+PHAN_BD = {int(k): tuple(v) for k, v in PHAN_BD.items()}
 BAM = {
  "b1_C0": "5c3a0ba851ad49f9f760a6c5e669378f45298b6ccce43301044bc7cc5ebf5ba4",
  "b1_C4": "2cc51dce45a70ce4673bb40c1adef3d6f7c2e68cf0303b04bfa1b4762451bddb",
@@ -212,6 +262,15 @@ BAM = {
  "b3_C0": "0046dee9ca304b275a2cb0c354a03806c9fbe1b37d0d6c9052ef553addf39e5f",
  "b3_QUYET": "3f2fa93b45aef33c7b8fdb61108b9b192d4ee0b63e096f8c16c880c778db5ca7",
  "b_C2B": "1fd2d2e31adab2f46ca542b5dc77793a387e811349456ffbe89ac778834a9357",
+ "bd1_C0": "bd59ce2b02f1a68e3718fb25e39518eec963c9dbd04daa07a4fa5b5891815c81",
+ "bd1_C4": "a900d98d2680707ae45a6265ec1b9ce539b4088c5ac909563f9a91ba3c4b1144",
+ "bd1_C6": "89731bbeaebff083a24a29dece16c2e27f62c3092946c2d614f8bab8bc8250bb",
+ "bd1_C7": "fa26c40835e03fdb6e1f29c17a75f9f29c1b265e23fa1e9d8714323469f42819",
+ "bd1_C9": "187c5344250a47c2c9f8c678e0d83a139bc2df42517d286846a196ad94388d41",
+ "bd2_C0": "81b04fa984f107024692090d802218e46a50afa7c2ca7be9ea10bcd481b76247",
+ "bd3_C0": "22d2913bd7a662bb10be2fe93b626ac5cf0a71052dbc04309254afcda37cc9fe",
+ "bd3_TONG_HOP": "d9e91342c79f015e39bc69925c5d68ff1a95d5a54fca1dc958efa2bfb0adebc3",
+ "bd_C2B": "2c1b9e52de67a0ba2b11ac4f09033f2a59917c3c3c189778fab1b608f9c8fb9a",
  "bg1_C0": "912c1073c45834ba7222438a272dd00ce3077ada9d511d805efe9629a24aba95",
  "bg1_C4": "f875bef409f0b8e69cfb44cfd6da5a4b6ce3accf3f836bbd511af1687e4dbd25",
  "bg1_C4G": "63970e008ba365e91a979ecb36f4af6e7e6bc65e2fbbeb06baacdf027357bfc7",
