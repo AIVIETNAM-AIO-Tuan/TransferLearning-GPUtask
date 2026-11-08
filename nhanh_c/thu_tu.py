@@ -252,6 +252,42 @@ PHAN_BD = {
  ]
 }   # bien the Bd (Tuan 06/11; docs/SPEC_SAU_78Y.md B.2aj)
 PHAN_BD = {int(k): tuple(v) for k, v in PHAN_BD.items()}
+PHAN_BP = {
+ "2": [
+  "bp2_C0",
+  "z_C1",
+  "z_C2",
+  "bp_C2B",
+  "z_C2C",
+  "z_c3",
+  "z_C3B",
+  "z_C3C",
+  "z_C4",
+  "z_c5",
+  "z_C5B",
+  "p2_C6",
+  "p2_C7",
+  "p2_C9",
+  "chuyen_2_3"
+ ],
+ "3": [
+  "bp3_C0",
+  "z_C1",
+  "z_C2",
+  "bp_C2B",
+  "z_C2C",
+  "z_c3",
+  "z_C3B",
+  "z_C3C",
+  "z_C4",
+  "z_c5",
+  "z_C5B",
+  "p3_C6S",
+  "bp3_SO_SANH",
+  "p3_C9S"
+ ]
+}   # bien the Bp (Tuan 08/11; Event 2026-11-08): do lai Phan 2 + 3 cua B s44, KHONG Phan 1
+PHAN_BP = {int(k): tuple(v) for k, v in PHAN_BP.items()}
 BAM = {
  "b1_C0": "5c3a0ba851ad49f9f760a6c5e669378f45298b6ccce43301044bc7cc5ebf5ba4",
  "b1_C4": "2cc51dce45a70ce4673bb40c1adef3d6f7c2e68cf0303b04bfa1b4762451bddb",
@@ -281,6 +317,10 @@ BAM = {
  "bg3_C0": "e3379936c82675bc59ecf910d1a7e83eb3dfa63af0efd5c75b68e7fdd0c10b5b",
  "bg3_QUYET": "3b35dc01d4a74924de00322125b36557c028ac7fe33f29f88084d4ae319205f3",
  "bg_C2B": "25f54261f9ad58322ce7d40a9916fe2398fdfb4fac2487b6766a252ef9b2ea15",
+ "bp2_C0": "3e83f558db34b6843c25b20f2b87ace7f4640b24f2b6fafd29db6730d7122343",
+ "bp3_C0": "56135168a4db211f890c3ac8556ce9798195e5e98c1f73294efabbfd8f9817d1",
+ "bp3_SO_SANH": "a855a187dd533f3fd4a256f07412ff51ebdb23b076974bd0f41aff3ddcf15be1",
+ "bp_C2B": "38d121ea3d503b26205ffe9b551d2c6b36a48b1ee159dfffe6c5674f4a7a4399",
  "chuyen_1_2": "6da4490622d917f44fec3519cdee4bc3c34bd219a8257635358b090edae0aaf0",
  "chuyen_2_3": "3f5e6fa037daa0653a8969fb1c5b89cecf781bdab5a51ee0192154d1e1033379",
  "g1_C0": "2544415d5e1103d5fa53448f41bae2403bf39ab900fcae6a63a62c4e2b011352",
