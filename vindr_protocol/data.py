@@ -22,8 +22,17 @@ STORES = {
     'kcb': dict(test=('stage4_nb85b', 'r85b_vindr_test_khong_cb'),
                 train={k: ('stage4_nb85e', f'r85e_vindr_train_p{k}_khong_cb') for k in (1, 2, 3)}),
 }
+# Dấu hiệu kiểu ảnh trong meta kho (trường anh.cach do 85b / 85e ghi — đã đối chiếu 10/11 với mã ĐÃ CHẠY của cả 8 notebook kho) + nhãn dễ đọc.
+STYLE_MARKS = {'cb': 'cv2.equalizeHist', 'kcb': 'KHONG equalizeHist'}
+STORE_LABELS = {'cb': 'CAN BANG histogram (nhu MIMIC-CXR-JPG)', 'kcb': 'KHONG can bang histogram'}
 N_LABELS, N_MAIN_CLASSES, MIN_TEST_POSITIVES, IMAGE_SIDE = 28, 21, 10, 518
 RESULT_85J, SUFFIX_KCB = ('stage4_nb85j', 'r85j_tien_xu_ly'), '_khong_cb'      # phép kiểm tiền xử lý của 85 (PLAN_85 §4.8)
+
+
+def store_style(meta):
+    '''Kiểu ảnh ghi trong meta kho 85b / 85e (anh.cach): 'kcb' nếu ghi KHONG equalizeHist, 'cb' nếu ghi cv2.equalizeHist, không rõ -> None.'''
+    cach = str((meta.get('anh') or {}).get('cach', ''))
+    return 'kcb' if STYLE_MARKS['kcb'] in cach else ('cb' if STYLE_MARKS['cb'] in cach else None)
 
 
 def image_store_from_85j(kiem_ke, tai, xung_dot, row, head='ml', log=print):
@@ -67,7 +76,7 @@ class VinDrData:
 
     def summary(self):
         n = {t: int((self.split == t).sum()) for t in ('train', 'val', 'test')}
-        return (f'VinDr (kho {self.store}): {len(self.keys):,} anh {IMAGE_SIDE} -> {self.image_dir} | train {n["train"]:,} / val {n["val"]:,} / '
+        return (f'VinDr (kho {self.store} = {STORE_LABELS[self.store]}): {len(self.keys):,} anh {IMAGE_SIDE} -> {self.image_dir} | train {n["train"]:,} / val {n["val"]:,} / '
                 f'test {n["test"]:,} | {len(self.label_names)} nhan, {len(self.main_classes)} lop so chinh | md5 khoa / nhan khop 85b + 3 phan 85e')
 
 
@@ -110,6 +119,9 @@ def load_vindr(kiem_ke, tai, xung_dot, image_dir, store='cb', log=print):
     assert (len({m['md5_nhan'] for m in mt_tr.values()}) == 1 and all(m['md5_khoa_train'] == md5_keys(keys_tr) for m in mt_tr.values())
             and list(nh_tr.columns[2:]) == names and set(nh_tr.tach) == {'train', 'val'}), 'meta / bang nhan train 85e KHONG khop -> DUNG'
     assert not set(keys_tr) & set(keys_te), 'anh train TRUNG test -> DUNG'
+    # ---- kiểu ảnh: meta kho (test + 3 phần train) phải ghi đúng kiểu được yêu cầu (như cổng meta ở ô D của 85f kho thứ hai) ----
+    styles = [store_style(m) for m in [mt_te] + [mt_tr[k] for k in (1, 2, 3)]]
+    assert styles == [store] * 4, f"kho '{store}' ({STORE_LABELS[store]}): meta kho ghi kieu anh {styles} (test, p1, p2, p3) -> DUNG"
     # ---- thứ tự hàng, nhãn 28 lớp, tách; 21 lớp số chính = 85e, kiểm lại từ số ca dương test của 85b ----
     keys = keys_tr + keys_te
     split = np.concatenate([nh_tr.tach.astype(str).to_numpy(), np.full(len(keys_te), 'test')]).astype(object)

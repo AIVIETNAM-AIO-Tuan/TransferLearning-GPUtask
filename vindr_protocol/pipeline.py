@@ -255,8 +255,8 @@ def run_main(vindr, backbone, protocol=config.Protocol(), main=config.MainRun(),
 
     log(f'86b {backbone.name}: (1) do lr {len(HEAD_TYPES)} x {len(protocol.lr_grid)} dau, seed 0, {main.epochs_phase1} epoch x {spe1} buoc tren train '
         f'{len(tr):,} anh | (2) them {main.n_seeds - 1} seed x {len(HEAD_TYPES)} dau o lr chon | (3) pha 2: {main.n_seeds * len(HEAD_TYPES)} dau hoc tiep '
-        f'{main.epochs_phase2} epoch x {spe2} buoc tren train + val {len(trva):,} anh | (4) du doan test {len(te):,} anh MOT lan | kho anh {vindr.store} | '
-        f'{nw} worker | RAM trong / tong {ram0[0]} / {ram0[1]} GB')
+        f'{main.epochs_phase2} epoch x {spe2} buoc tren train + val {len(trva):,} anh | (4) du doan test {len(te):,} anh MOT lan | '
+        f'kho anh {vindr.store} = {data.STORE_LABELS[vindr.store]} | {nw} worker | RAM trong / tong {ram0[0]} / {ram0[1]} GB')
     # ---- (1) dò lr ----
     search = [training.new_run(t, lr, config.head_seed(protocol, main.epochs_phase1, t, i, 0), n1, dim, n_cls, dev, protocol, seed_index=0)
               for t in HEAD_TYPES for i, lr in enumerate(protocol.lr_grid)]
@@ -307,9 +307,9 @@ def run_main(vindr, backbone, protocol=config.Protocol(), main=config.MainRun(),
     result = dict(
         t=datetime.datetime.now().strftime('%Y%m%d_%H%M%S'), run=run_tag, commit_chexfound=config.CHEXFOUND_COMMIT,
         goi_sha=getattr(vindr_protocol, 'GOI_SHA', None), goi_phien_ban=vindr_protocol.__version__, bb=backbone.name, nguon_bb=backbone.source,
-        kho_anh=vindr.store, kich=sp.image_size, mean=[float(v) for v in sp.mean], std=[float(v) for v in sp.std], amp_backbone=str(backbone.amp),
-        tf32_dau=True, luoi=list(protocol.lr_grid), lo=bs, chia=protocol.loss_divisor, wd=protocol.weight_decay, hat_du_lieu=protocol.data_seed,
-        hat_dau=protocol.head_seed, so_seed=main.n_seeds, lech_hat_pha2=main.phase2_seed_offset,
+        kho_anh=vindr.store, kieu_anh=data.STORE_LABELS[vindr.store], kich=sp.image_size, mean=[float(v) for v in sp.mean],
+        std=[float(v) for v in sp.std], amp_backbone=str(backbone.amp), tf32_dau=True, luoi=list(protocol.lr_grid), lo=bs,
+        chia=protocol.loss_divisor, wd=protocol.weight_decay, hat_du_lieu=protocol.data_seed, hat_dau=protocol.head_seed, so_seed=main.n_seeds, lech_hat_pha2=main.phase2_seed_offset,
         epoch=dict(pha1=main.epochs_phase1, pha2=main.epochs_phase2), buoc_moi_epoch=dict(pha1=spe1, pha2=spe2),
         tong_buoc=dict(pha1=n1, pha2=n2, moi_dau=n1 + n2), n_train=len(tr), n_val=len(va), n_test=len(te), md5_khoa=data.md5_keys(vindr.keys),
         md5_khoa_test=data.md5_keys([vindr.keys[i] for i in te]), nhan=list(vindr.label_names), lop_chinh=list(vindr.main_classes),
