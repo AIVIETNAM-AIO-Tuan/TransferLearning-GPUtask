@@ -31,11 +31,17 @@ class BackboneSpec:
 
 
 @dataclass(frozen=True)
+class CurveDiagnostic:
+    '''Quy tắc chẩn đoán đường học (PLAN_86 §5.2, Tuấn duyệt 10/11): CHỈ MÔ TẢ, áp như nhau cho mọi encoder x đầu.'''
+    drop_threshold: float = 0.002           # cờ val_drop_after_peak khi AUROC đỉnh - AUROC cuối vượt ngưỡng này
+    gain_window: int = 5                    # mức tăng AUROC trong bấy nhiêu epoch cuối (thấy đường còn tăng)
+
+
+@dataclass(frozen=True)
 class Pilot:
     '''Chạy thử pha 1 (86a; PLAN_86 §5.1).'''
     budgets: tuple = (10, 20)               # hai ngân sách epoch học song song
     epoch_rule_threshold: float = 0.002     # chênh AUROC val tối đa để chọn ngân sách nhỏ
-    convergence_threshold: float = 0.002    # PLAN_86 §5.2
     solo_check_steps: int = 10              # số bước của phép kiểm "một đầu riêng = trong nhóm"
     solo_check_logit_tol: float = 1e-3      # ngưỡng lệch logit (GPU không tất định từng bit)
     check_lr: float = 1e-3                  # lr của các đầu kiểm

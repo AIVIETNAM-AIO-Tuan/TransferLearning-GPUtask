@@ -93,7 +93,8 @@ def check_solo_vs_group(group_snapshot, check_runs, backbone, dataset, indices, 
 
 
 # ---- chạy thử pha 1 (86a) ----
-def run_phase1_pilot(vindr, backbone, protocol=config.Protocol(), pilot=config.Pilot(), num_workers=None, run_tag='', log=print):
+def run_phase1_pilot(vindr, backbone, protocol=config.Protocol(), pilot=config.Pilot(), num_workers=None, run_tag='', log=print,
+                     curve=config.CurveDiagnostic()):
     '''CHẠY THỬ pha 1: 3 loại đầu x 13 lr x các ngân sách epoch (cosine theo từng ngân sách) học song song trên train, chấm val mỗi epoch
        (đầu đọc eval()); chọn lr theo AUROC val; luật khoá epoch; tốc độ / bộ nhớ; các phép kiểm. KHÔNG dự đoán test. Cổng trước vòng học ném
        lỗi; SAU vòng học không ném lỗi: mục trượt nằm ở kiem_dat (để notebook vẫn ghi + đồng bộ kết quả). -> dict kết quả (ghi JSON được).'''
@@ -137,14 +138,18 @@ def run_phase1_pilot(vindr, backbone, protocol=config.Protocol(), pilot=config.P
     best = {(E, t): selection.best_run([r for r in runs if r.tags['budget'] == E and r.head_type == t]) for E in pilot.budgets for t in HEAD_TYPES}
     e_lock, diff = selection.epoch_rule(best, pilot.budgets, pilot.epoch_rule_threshold) if all(best.values()) else (None, {})
     log(f"\n=== chon lr (AUROC val 28 nhan lan cham cuoi, ngu nghia torchmetrics 0.10.3) | dau phan ky (val NaN): {len(kiem['dau_phan_ky'])} ===")
-    log(f"{'loai':<7}{'E':>4}{'lr':>9}{'AUROC 28':>10}{'AP 28':>8}{'AUPRC':>8}{'AUROC 21':>10}{'hoi tu':>8}  duong AUROC val (lr chon, tung epoch)"
-        "   [AP = AP bac thang = 'AUPRC' cua bai CheXFound; AUPRC = hinh thang, bao kem nhu 85]")
+    log(f"{'loai':<7}{'E':>4}{'lr':>9}{'AUROC 28':>10}{'AP 28':>8}{'AUPRC':>8}{'AUROC 21':>10}{'dinh (ep)':>15}{'giam':>8}"
+        f"{f'tang {curve.gain_window} cuoi':>13}  duong AUROC val (lr chon, tung epoch)"
+        "   [AP = AP bac thang = 'AUPRC' cua bai CheXFound; AUPRC = hinh thang, bao kem nhu 85; chan doan duong hoc §5.2: CHI mo ta]")
+    curves = {}
     for (E, t), r in best.items():
         if r is None:
             log(f'{t:<7}{E:>4}  ⚠ KHONG dau nao co AUROC val > 0'); continue
+        c = curves[(E, t)] = selection.learning_curve_summary(r.val_auroc, r.train_loss, curve.drop_threshold, curve.gain_window)
+        gain = '-' if c['gain_last'] is None else f"{c['gain_last']:+.4f}"
         log(f"{t:<7}{E:>4}{r.lr:>9g}{r.val_auroc[-1]:>10.4f}{r.val_ap[-1]:>8.4f}{r.val_auprc[-1]:>8.4f}{r.val_auroc_main[-1]:>10.4f}"
-            f"{('co' if selection.converged(r, pilot.convergence_threshold) else 'KHONG'):>8}  " + ' '.join(f'{v:.3f}' for v in r.val_auroc)
-            + (' | ⚠ lr o MEP luoi' if r.lr in (protocol.lr_grid[0], protocol.lr_grid[-1]) else ''))
+            f"{c['peak_auroc']:>10.4f} ({c['peak_epoch']:>2}){c['drop_after_peak']:>8.4f}{gain:>13}  " + ' '.join(f'{v:.3f}' for v in r.val_auroc)
+            + (' | val_drop_after_peak' if c['val_drop_after_peak'] else '') + (' | ⚠ lr o MEP luoi' if r.lr in (protocol.lr_grid[0], protocol.lr_grid[-1]) else ''))
     if e_lock is not None:
         log(f'LUAT khoa epoch (dat truoc, PLAN_86 5.1): AUROC val tot nhat E={max(pilot.budgets)} - E={min(pilot.budgets)} theo loai '
             + ', '.join(f'{k} {v:+.4f}' for k, v in diff.items()) + f' | nguong {pilot.epoch_rule_threshold} -> E1 = E2 = {e_lock}')
@@ -184,7 +189,7 @@ def run_phase1_pilot(vindr, backbone, protocol=config.Protocol(), pilot=config.P
         lop_chinh=list(vindr.main_classes), kho_anh=vindr.store,
         duong={r.name: dict(auc=r.val_auroc, ap=r.val_ap, auprc=r.val_auprc, auc21=r.val_auroc_main, loss=r.train_loss) for r in runs},
         chon={f'{E}|{t}': (None if r is None else dict(lr=r.lr, auc=r.val_auroc[-1], ap=r.val_ap[-1], auprc=r.val_auprc[-1], auc21=r.val_auroc_main[-1],
-                                                       hoi_tu=selection.converged(r, pilot.convergence_threshold)))
+                                                       duong_hoc=curves[(E, t)]))
               for (E, t), r in best.items()},
         luat_epoch=dict(chenh=diff, nguong=pilot.epoch_rule_threshold, e_chot=e_lock), kiem=kiem, kiem_dat=kiem_dat, toc_do=toc_do,
         nguon=vindr.sources, ghi_chu='PLAN_86 7 buoc 2: chay thu pha 1, CHI val, KHONG du doan test (goi vindr_protocol).')
