@@ -96,14 +96,14 @@ def inspect(reader, inv, sources=config.K0_SOURCES, log=print):
 
 
 def conclude(res, sources=config.K0_SOURCES, log=print):
-    '''Kết luận cho 87c (+ sự thật về recipe s43: Tuấn quyết theo recipe / artifact, không theo điểm VinDr).'''
+    '''Kết luận cho 87c (+ sự thật về recipe s43, biến thể B: Tuấn đã duyệt đưa vào K3 10/11 theo recipe / artifact, không theo điểm VinDr; §17).'''
     k3 = [h for h, c in sources.items() if c['k3']]
     k3_p1 = [h for h in k3 if res[h]['p1_san_sang']]
     k3_p2 = [h for h in k3 if res[h]['p2_san_sang'] and not res[h]['p1_san_sang']]
     log(f"K3 (87c): {len(k3_p1)} / {len(k3)} seed du cho P1 + P2 {k3_p1}" + (f" | CHI du cho P2 (thieu nguon P1 — bao Claude truoc khi chay 87c): {k3_p2}" if k3_p2 else '')
         + (f" | THIEU encoder: {[h for h in k3 if not res[h]['p2_san_sang']]}" if any(not res[h]['p2_san_sang'] for h in k3) else ''))
     s43 = res.get('B_s43') or {}
-    log(f"s43 (bien the B, KHONG thuoc K3): du P2 {s43.get('p2_san_sang')} / du P1 {s43.get('p1_san_sang')} | backbone ep "
-        f"{((s43.get('rs') or {}).get('ep', -2) + 1) if s43.get('rs') else 'thieu'} | quy tac epoch {(s43.get('nguon_p2') or {}).get('quy_tac')} -> Tuan quyet")
+    log(f"s43 (bien the B, ghep cap C s43): du P2 {s43.get('p2_san_sang')} / du P1 {s43.get('p1_san_sang')} | backbone ep "
+        f"{((s43.get('rs') or {}).get('ep', -2) + 1) if s43.get('rs') else 'thieu'} | quy tac epoch {(s43.get('nguon_p2') or {}).get('quy_tac')}")
     log(f"so quyet dinh Drive khop so in o notebook: {[h for h, r in res.items() if r['so_qd_khop']]} | KHAC: {[h for h, r in res.items() if r['so_qd_khop'] is False]}")
     return dict(k3_p1=k3_p1, k3_chi_p2=k3_p2, k3_thieu=[h for h in k3 if not res[h]['p2_san_sang']])

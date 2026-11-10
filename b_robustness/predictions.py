@@ -17,7 +17,7 @@ def rows_anchor_and_sota():
 
 
 def rows_k3():
-    '''Hàng của bảng K3: B s42 (85f) + B s44 _lai / s45 / s46 (87c) — có P1; SOTA (85f) — chỉ P2.'''
+    '''Hàng của bảng K3: B s42 (85f) + B s43 / s44 _lai / s45 / s46 (87c) — có P1; SOTA (85f) — chỉ P2.'''
     b = {config.ANCHOR_ROW: dict(folder=(config.FOLDER_85F, config.RUN_85F[config.ANCHOR]), bb=config.ANCHOR, heads=config.B_HEADS, p1_seed=42,
                                  new=False, notebook=config.NOTEBOOK_85F[config.ANCHOR])}
     b.update({config.ROW[s]: dict(folder=(config.FOLDER_K3, config.RUN_K3[s]), bb=config.ROW[s], heads=config.B_HEADS, p1_seed=s, new=True,

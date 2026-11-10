@@ -62,7 +62,8 @@ def run_source_audit(kiem_ke, tai, xung_dot, log=print):
     files = {f'kiem_nguon_{ts}.json': dict(
         t=ts, nguon=config.K0_SOURCES, ket_qua=res, ket_luan=concl, thieu={h: v['thieu'] for h, v in inv.items()},
         nhieu_ban={h: v['nhieu_ban'] for h, v in inv.items()}, so_tep={h: v['so_tep'] for h, v in inv.items()},
-        goi=dict(b_robustness=package_commit(), nhanh_c=config.NHANH_C_COMMIT, nhanh_c_s45_s46=config.NHANH_C_COMMIT_S45_S46, buoc=list(config.PART3_STEPS)),
+        goi=dict(b_robustness=package_commit(), nhanh_c=config.NHANH_C_COMMIT, nhanh_c_s45_s46=config.NHANH_C_COMMIT_S45_S46, nhanh_c_s43=config.NHANH_C_COMMIT_S43,
+                 buoc={v: list(t) for v, t in config.PART3_STEPS.items()}),
         so_quyet_dinh_nb84={config.ROW[s]: dict(gia_tri=config.DECISION_SCORE[s], tep=config.RUN_NOTEBOOK_84[s], commit=config.RUN_COMMIT_84[s]) for s in config.K3_SEEDS},
         ghi_chu='87a (PLAN_KIEM_THU §15.3): K0 kiem nguon; du P2 = rs_ ep5 + module dung; du P1 = + w_ / p_ du + nguon_backbone.json khop.')}
     return dict(result=res, conclusion=concl, files=files)
@@ -117,7 +118,7 @@ def run_seed_table(kiem_ke, tai, xung_dot, n_boot=config.N_BOOT, log=print):
 # ===================================================================================== 87c
 class SeedTransfer:
     '''Một backbone seed B mới sau backbone_b.run_part3(globals(), NC, seed): P1 (C6V) -> dữ liệu P2 (D) -> token (T) -> học đầu (H) -> ghi (G + M).
-       Hàm Drive = hàm của khối ghi / đọc chuẩn mà bước bd3_C0 đã định nghĩa trong notebook (truyền vào tường minh).'''
+       Hàm Drive = hàm của khối ghi / đọc chuẩn mà bước C0 Phần 3 (bd3_C0 / b3_C0) đã định nghĩa trong notebook (truyền vào tường minh).'''
 
     def __init__(self, ns, nhanh_c, seed, kiem_ke, tai, xung_dot, ghi, ghi_json, log=print):
         assert seed in config.K3_SEEDS, seed
@@ -127,7 +128,8 @@ class SeedTransfer:
         self.kiem_ke, self.tai, self.xung_dot, self.ghi, self.ghi_json, self.log = kiem_ke, tai, xung_dot, ghi, ghi_json, log
         assert ns.get('RUN_TAG') == self.run_tag and tuple(ns.get('DRV_DUONG', ())) == (config.FOLDER_K3, self.run_tag), (
             f"RUN_TAG / DRV_DUONG cua Phan 3 KHAC {config.FOLDER_K3}/{self.run_tag} -> chay o Phan 3 bang backbone_b.run_part3. DUNG")
-        assert int(ns['SEED']) == seed and ns['CAU_HINH_C']['run_x'] == f'r84x_{self.row}', 'namespace mang seed KHAC -> DUNG'
+        assert int(ns['SEED']) == seed and ns['CAU_HINH_C']['run_x'] == f'r84x_{self.row}' and ns['CAU_HINH_C'].get('bien_the') == config.K3_VARIANT[seed], (
+            'namespace mang seed / bien the KHAC -> DUNG')
         self.p1 = self.data = self.tokens = self.result = None
         self.written = []
 
@@ -158,7 +160,7 @@ class SeedTransfer:
         assert self.result is not None, 'chay o hoc dau truoc -> DUNG'
         files = transfer.p2_files(self.data, self.tokens, self.result, self.row, self.run_tag)
         m = transfer.manifest(self.view, getattr(self.nhanh_c, '_NHANH_C_SHA_DA_NAP', None), package_commit(), self.seed, self.row, self.run_tag,
-                              self.tokens, self.result, transfer.sha256_steps(self.nhanh_c), config.RUN_NOTEBOOK_84[self.seed])
+                              self.tokens, self.result, transfer.sha256_steps(self.nhanh_c, self.seed), config.RUN_NOTEBOOK_84[self.seed])
         files[f'manifest_{self.row}.json'] = m
         save(self.ghi, self.ghi_json, files, self.log); self.written += list(files)
         self.log(f"87c manifest {self.row}: nhanh_c {str(m['goi']['nhanh_c']['commit'])[:8]} (luot goc {m['goi']['nhanh_c']['commit_luot_goc'][:8]}) | "

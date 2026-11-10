@@ -198,17 +198,18 @@ def manifest(view, nhanh_c_commit, package_commit, seed, row, run_tag, tokens, r
     ns = view.ns
     qd = view.decision_score()
     assert abs(qd - config.DECISION_SCORE[seed]) <= config.DECISION_TOL, 'so quyet dinh tinh lai KHAC manifest -> DUNG'
-    return dict(module='87', muc='K3', notebook=config.NOTEBOOK_K3[seed], hang=row, seed=seed, bien_the=config.NHANH_C_VARIANT, run_tag=run_tag,
+    return dict(module='87', muc='K3', notebook=config.NOTEBOOK_K3[seed], hang=row, seed=seed, bien_the=config.K3_VARIANT[seed], run_tag=run_tag,
                 drv=[config.FOLDER_K3, run_tag], goi=dict(nhanh_c=dict(nhanh=config.NHANH_C_BRANCH, commit=nhanh_c_commit, commit_luot_goc=config.RUN_COMMIT_84[seed],
-                                                                      buoc=list(config.PART3_STEPS), sha256_buoc=step_sha256),
+                                                                      buoc=list(config.PART3_STEPS[config.K3_VARIANT[seed]]), sha256_buoc=step_sha256),
                                                           b_robustness=package_commit),
-                so_quyet_dinh_nb84=dict(gia_tri=config.DECISION_SCORE[seed], tep=notebook_84, dung_sai=config.DECISION_TOL), so_quyet_dinh_tinh_lai=qd,
+                so_quyet_dinh_nb84=dict(gia_tri=config.DECISION_SCORE[seed], tep=notebook_84, nguon_so=config.DECISION_SOURCE[seed], dung_sai=config.DECISION_TOL),
+                so_quyet_dinh_tinh_lai=qd,
                 cau_hinh_c=ns['CAU_HINH_C'], nguon_bb=ns['NGUON_BB'], ep_bb=ns['EP_BB'], cong_p2=tokens.gates, dau_p2=list(result['heads']),
                 dau_p1=list(ns['DAU_S']))
 
 
-def sha256_steps(nhanh_c):
-    return {t: nhanh_c.BAM[t] for t in config.PART3_STEPS}
+def sha256_steps(nhanh_c, seed):
+    return {t: nhanh_c.BAM[t] for t in config.PART3_STEPS[config.K3_VARIANT[seed]]}
 
 
 def md5_text(s):

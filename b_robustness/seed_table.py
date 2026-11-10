@@ -2,8 +2,8 @@
 
 P1 (đầu MIMIC 40 lớp, KHÔNG học lại; 12 lớp, ánh xạ chốt ở 85b): mAP / mAUROC / mAUPRC, hai nửa, CI95 theo seed; B s42 phải trùng JSON 85d.
 P2 (21 lớp; ML-Decoder / chỉ patch / linear): đầu đơn TB ± SD mẫu, ensemble + CI95, B_seed − X + phán xử DẠNG luật P2 từng seed;
-qua seed: ba seed MỚI TB ± SD mẫu, B s42 báo RIÊNG (seed phát triển, test đã đọc); B s42 + SOTA phải trùng JSON 85g.
-Không ensemble nhiều backbone, không gọi 3 backbone x 5 đầu là 15 seed."""
+qua seed: các seed MỚI (s43 / s44 _lai / s45 / s46) TB ± SD mẫu, B s42 báo RIÊNG (seed phát triển, test đã đọc); B s42 + SOTA phải trùng JSON 85g.
+Không ensemble nhiều backbone, không gọi n backbone x 5 đầu là 5n seed."""
 import time
 
 import numpy as np
@@ -82,7 +82,7 @@ def p2_table(test, pred, b_rows, sota_rows, js_85g, json_85g_name, n_boot=config
             v = {h: res[(h, d, 'chinh')]['ap'] - res[(x, d, 'chinh')]['ap'] for h in new}
             across[('chenh', d, x)] = dict(mean_sd(list(v.values())), gia_tri=v,
                                            so_seed_b_hon=sum(verdict[h][x][2] == 'B HON' for h in new) if d == 'ml' else None)
-    log(f"\n=== Qua backbone seed: {len(new)} seed MOI ({', '.join(new)}) — TB +- SD MAU; B_s42 RIENG; KHONG gop thanh 15 seed, KHONG ensemble nhieu backbone ===")
+    log(f"\n=== Qua backbone seed: {len(new)} seed MOI ({', '.join(new)}) — TB +- SD MAU; B_s42 RIENG; KHONG gop thanh {5 * len(new)} seed, KHONG ensemble nhieu backbone ===")
     for d in config.B_HEADS:
         v = across[('ens', d)]
         log(f"  ensemble {d:<9}: mAP {v['tb']:.4f} +- {v['sd']:.4f} | B_s42 {res[(config.ANCHOR_ROW, d, 'chinh')]['ap']:.4f}")

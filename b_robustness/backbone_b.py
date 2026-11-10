@@ -1,9 +1,10 @@
-"""Backbone B của một seed (biến thể Bd của gói nhanh_c, module 84): Phần 3 = dựng lại backbone + luồng vùng đông cứng từ Phần 1 / 2 đã chạy,
-gộp trọng số đầu MIMIC ep1–10 và cổng tái lập C6S (so dự đoán đã lưu của lượt gốc). KHÔNG viết lại: 12 bước đọc nguyên từ gói nhanh_c ghim
-commit, sha256 = bảng BAM (như NC.buoc), chạy trong namespace notebook.
+"""Backbone B của một seed (gói nhanh_c, module 84; biến thể Bd cho s44 _lai / s45 / s46, biến thể B cho s43 — config.K3_VARIANT): Phần 3 =
+dựng lại backbone + luồng vùng đông cứng từ Phần 1 / 2 đã chạy, gộp trọng số đầu MIMIC ep1–10 và cổng tái lập C6S (so dự đoán đã lưu của lượt
+gốc). KHÔNG viết lại: 12 bước của biến thể đọc nguyên từ gói nhanh_c ghim commit, sha256 = bảng BAM (như NC.buoc), chạy trong namespace notebook.
 
-Khác NC.buoc DUY NHẤT ở bước bd3_C0: thay đúng 3 dòng RUN_TAG / RES57 / DRV_DUONG để kết quả ghi vào thư mục của 87c. Khối ghi Drive trong
-bd3_C0 dò ID thư mục ghi NGAY LÚC KHỞI TẠO (DRV_ID, DRV_TAT_CA = _dich(DRV_DUONG)) -> không thể chạy nguyên bước rồi đặt lại DRV_DUONG.
+Khác NC.buoc DUY NHẤT ở bước C0 của biến thể (bd3_C0 / b3_C0): thay đúng 3 dòng RUN_TAG / RES57 / DRV_DUONG để kết quả ghi vào thư mục của 87c.
+Khối ghi Drive trong bước đó dò ID thư mục ghi NGAY LÚC KHỞI TẠO (DRV_ID, DRV_TAT_CA = _dich(DRV_DUONG)) -> không thể chạy nguyên bước rồi đặt lại
+DRV_DUONG.
 
 Part3View: các tên của namespace Phần 3 mà phần sau (P1, trích token, học đầu) đọc — khai báo một chỗ, thiếu tên -> dừng; nối / trả hàng ảnh
 ngoài vào các mảng theo hàng ORDER mà predict đọc (= _noi_hang_g / _tra_lai_g của 82c)."""
@@ -18,7 +19,7 @@ import torch
 
 from . import config
 
-# dòng gốc của bd3_C0 (regex cả dòng) -> dòng thay (format run_tag, folder)
+# dòng gốc của bd3_C0 / b3_C0 (regex cả dòng; hai bước có cùng 3 dòng) -> dòng thay (format run_tag, folder)
 OUTPUT_LINES = (
     (r"^RUN_TAG = CAU_HINH_C\['run_gts'\].*$",
      "RUN_TAG = '{run_tag}'   # 87c (b_robustness.backbone_b): P1 + trich token VinDr + hoc lai dau, KHONG train; thu muc RIENG"),
@@ -40,39 +41,63 @@ def step_source(nhanh_c, name):
 
 
 def redirect_output(code, run_tag, folder):
-    '''Thay đúng 3 dòng ghi của bd3_C0; mỗi dòng gốc phải khớp ĐÚNG MỘT lần, không thì dừng.'''
+    '''Thay đúng 3 dòng ghi của bước C0 (bd3_C0 / b3_C0); mỗi dòng gốc phải khớp ĐÚNG MỘT lần, không thì dừng.'''
     for rx, new in OUTPUT_LINES:
         m = list(re.finditer(rx, code, flags=re.M))
         if len(m) != 1:
-            raise RuntimeError(f'bd3_C0: dong {rx!r} khop {len(m)} lan (can 1) -> goi nhanh_c KHAC ban da kiem. DUNG')
+            raise RuntimeError(f'buoc C0 Phan 3: dong {rx!r} khop {len(m)} lan (can 1) -> goi nhanh_c KHAC ban da kiem. DUNG')
         code = code[:m[0].start()] + new.format(run_tag=run_tag, folder=folder) + code[m[0].end():]
     return code
 
 
+def variant(seed):
+    '''Biến thể gói nhanh_c của lượt backbone seed (config.K3_VARIANT).'''
+    assert seed in config.K3_SEEDS, seed
+    return config.K3_VARIANT[seed]
+
+
+def steps(seed):
+    '''12 bước Phần 3 chạy cho seed (theo biến thể).'''
+    return config.PART3_STEPS[variant(seed)]
+
+
 def part3_code(nhanh_c, seed, name):
-    '''Mã sẽ chạy cho bước `name` của seed (bd3_C0: đã thay 3 dòng ghi).'''
+    '''Mã sẽ chạy cho bước `name` của seed (bước C0 của biến thể: đã thay 3 dòng ghi). Bước không thuộc biến thể của seed -> dừng
+       (vd bd3_C0 cho s43 sẽ KHÔNG được thay dòng ghi).'''
+    v = variant(seed)
+    assert name in config.PART3_STEPS[v], f'buoc {name} KHONG thuoc Phan 3 bien the {v} (seed {seed}) -> DUNG'
     code, p = step_source(nhanh_c, name)
-    if name == 'bd3_C0':
+    if name == config.PART3_C0[v]:
         code = redirect_output(code, config.RUN_K3[seed], config.FOLDER_K3)
     return code, p
 
 
+def seed_config(nhanh_c, seed):
+    '''cau_hinh của lượt gói 84 cho seed (biến thể của seed) + cổng: thứ tự Phần 3 của gói, lượt Phần 1, epoch backbone 5.'''
+    v = variant(seed)
+    st = list(config.PART3_STEPS[v])
+    assert list(nhanh_c.ds_buoc(3, bien_the=v)) == st + list(config.PART3_SKIPPED[v]), f'thu tu Phan 3 bien the {v} cua goi KHAC ban da kiem -> DUNG'
+    cfg = nhanh_c.cau_hinh(seed, False, v)
+    ep = cfg['ep_co_dinh'] if v == 'Bd' else cfg['ep_khoa']['ep']
+    assert cfg['bien_the'] == v and cfg['run_x'] == f'r84x_{config.ROW[seed]}' and ep == config.K0_BACKBONE_EPOCH, (
+        f"cau hinh goi 84 seed {seed}: bien the {cfg.get('bien_the')} / {cfg['run_x']} / ep {ep} KHAC -> DUNG")
+    return cfg
+
+
 def run_part3(ns, nhanh_c, seed, start=None, log=print):
-    '''Chạy 12 bước Phần 3 biến thể Bd cho `seed` trong namespace `ns` (globals() của notebook) — như các ô Phần 3 của notebook gói 84.
+    '''Chạy 12 bước Phần 3 (biến thể của seed) trong namespace `ns` (globals() của notebook) — như các ô Phần 3 của notebook gói 84.
        start = tên bước để chạy lại từ đó (sau khi một bước lỗi giữa chừng, cùng phiên).'''
     assert seed in config.K3_SEEDS, seed
     assert isinstance(ns, dict), 'ns phai la globals() cua notebook'
-    steps = list(config.PART3_STEPS)
-    assert list(nhanh_c.ds_buoc(3, bien_the=config.NHANH_C_VARIANT)) == steps + ['bd3_TONG_HOP', 'p3_C9S'], 'thu tu Phan 3 cua goi KHAC ban da kiem -> DUNG'
-    cfg = nhanh_c.cau_hinh(seed, False, config.NHANH_C_VARIANT)
-    assert cfg['run_x'] == f'r84x_{config.ROW[seed]}' and cfg['ep_co_dinh'] == config.K0_BACKBONE_EPOCH, cfg['run_x']
+    v, st = variant(seed), list(steps(seed))
+    cfg = seed_config(nhanh_c, seed)
     cu = ns.get('CAU_HINH_C')
     if cu is not None and cu != cfg:
         raise ValueError('namespace dang mang cau hinh luot KHAC -> Restart session roi chay lai tu dau notebook')
-    for name in steps[steps.index(start) if start else 0:]:
+    for name in st[st.index(start) if start else 0:]:
         code, p = part3_code(nhanh_c, seed, name)
         ns['CAU_HINH_C'] = cfg
-        log(f'\n######## Phan 3 · buoc {name} (goi nhanh_c, seed {seed}, bien the {config.NHANH_C_VARIANT}) ########')
+        log(f'\n######## Phan 3 · buoc {name} (goi nhanh_c, seed {seed}, bien the {v}) ########')
         exec(compile(code, p, 'exec'), ns)
 
 
