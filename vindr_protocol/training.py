@@ -2,6 +2,7 @@
 đoán, chấm val. Mỗi đầu một optimizer = một param group của optimizer chung trong mã gốc (AdamW cập nhật từng tham số độc lập).
 
 RNG (PLAN_86 §4.4): khởi tạo theo hạt của đầu; dropout theo (hạt đầu, bước) -> thêm / bớt đầu khác không đổi đầu này."""
+import copy
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -48,6 +49,16 @@ def new_run(head_type, lr, seed, max_steps, dim, num_classes, device, protocol, 
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=protocol.weight_decay)
     return HeadRun(head_type, float(lr), int(seed), int(max_steps), model, opt,
                    torch.optim.lr_scheduler.CosineAnnealingLR(opt, int(max_steps), eta_min=0), dict(tags))
+
+
+def continue_run(run, max_steps, protocol, seed_offset, **tags):
+    '''Pha 2 (= resume_or_load của mã gốc: CHỈ nạp trọng số): bản sao đầu pha 1 của CHÍNH nó (cùng kiến trúc + trọng số + query cố định);
+       AdamW + CosineAnnealingLR(max_steps) + bước đếm MỚI; dropout theo hạt (seed + seed_offset); cùng lr.'''
+    model = copy.deepcopy(run.model)
+    model.train()
+    opt = torch.optim.AdamW(model.parameters(), lr=run.lr, weight_decay=protocol.weight_decay)
+    return HeadRun(run.head_type, run.lr, run.seed + int(seed_offset), int(max_steps), model, opt,
+                   torch.optim.lr_scheduler.CosineAnnealingLR(opt, int(max_steps), eta_min=0), dict(run.tags, **tags))
 
 
 def step_seed(seed, step):

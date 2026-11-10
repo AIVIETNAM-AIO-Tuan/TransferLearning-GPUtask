@@ -193,3 +193,134 @@ def run_phase1_pilot(vindr, backbone, protocol=config.Protocol(), pilot=config.P
               for (E, t), r in best.items()},
         luat_epoch=dict(chenh=diff, nguong=pilot.epoch_rule_threshold, e_chot=e_lock), kiem=kiem, kiem_dat=kiem_dat, toc_do=toc_do,
         nguon=vindr.sources, ghi_chu='PLAN_86 7 buoc 2: chay thu pha 1, CHI val, KHONG du doan test (goi vindr_protocol).')
+
+
+# ---- lượt chính (86b) ----
+def _curves(run):
+    return dict(auc=run.val_auroc, ap=run.val_ap, auprc=run.val_auprc, auc21=run.val_auroc_main, loss=run.train_loss)
+
+
+def _timing(t, val_s):
+    busy = max(1e-9, t['cho'] + t['dac'] + t['dau'])
+    return dict(phut_hoc=busy / 60, phut_val=val_s / 60, anh_moi_giay=t['anh'] / busy,
+                ti_le=dict(cho_du_lieu=t['cho'] / busy, encoder=t['dac'] / busy, dau_doc=t['dau'] / busy))
+
+
+def run_main(vindr, backbone, protocol=config.Protocol(), main=config.MainRun(), curve=config.CurveDiagnostic(), num_workers=None, run_tag='',
+             extra=None, log=print):
+    '''LƯỢT CHÍNH cho MỘT backbone (PLAN_86 §4.4, §5.2):
+         (1) dò lr: 3 loại đầu x 13 lr, seed 0, E1 epoch trên train, chấm val mỗi epoch; lr = AUROC val lần chấm cuối lớn nhất (hoà -> lr nhỏ);
+         (2) thêm seed 1 .. n-1 ở lr đã chọn (E1 epoch, chấm val mỗi epoch);
+         (3) chẩn đoán đường học cho mọi seed (CHỈ mô tả) + dự đoán val lần cuối pha 1;
+         (4) pha 2: mỗi đầu học TIẾP từ trọng số pha 1 của chính nó trên train + val, E2 epoch, optimizer / cosine / bước đếm mới, checkpoint cuối;
+         (5) dự đoán test MỘT lần sau pha 2 — KHÔNG tính số đo test (chấm ở notebook bảng).
+       Cổng trước vòng học ném lỗi; không chọn được lr cho một loại đầu (mọi lr phân kỳ) = lỗi kỹ thuật -> ném lỗi.
+       -> (kết quả ghi JSON được, mảng dự đoán {tên: ndarray float32} để lưu .npz).'''
+    import vindr_protocol
+    nw = runtime.default_num_workers() if num_workers is None else num_workers
+    dev, pin, bs = backbone.device, backbone.device == 'cuda', protocol.batch_size
+    runtime.allow_tf32_heads()
+    tr, va, te = vindr.indices('train'), vindr.indices('val'), vindr.indices('test')
+    assert len(tr) and len(va) and len(te) and not (set(tr.tolist()) & set(va.tolist()) or set(te.tolist()) & set(np.r_[tr, va].tolist())), (
+        'tach train / val / test rong hoac chong nhau -> DUNG')
+    assert set(np.unique(vindr.labels[np.r_[tr, va]]).tolist()) <= {0.0, 1.0}, 'nhan train / val khong nhi phan -> DUNG'
+    tf_train, tf_eval = data.build_transforms(backbone.spec)
+    ds_tr = data.VinDrImages(vindr.keys, vindr.image_dir, tf_train, seed=protocol.data_seed)
+    ds_ev = data.VinDrImages(vindr.keys, vindr.image_dir, tf_eval)
+    gate = features.check_features(backbone, Image.open(os.path.join(vindr.image_dir, f'{vindr.keys[int(tr[0])]}.jpg')).convert('RGB'), tf_eval)
+    trva = np.sort(np.r_[tr, va])
+    spe1, spe2 = config.steps_per_epoch(len(tr), bs), config.steps_per_epoch(len(trva), bs)
+    n1, n2 = main.epochs_phase1 * spe1, main.epochs_phase2 * spe2
+    n_cls, dim = len(vindr.label_names), backbone.dim
+    y_val, main_idx = vindr.labels[va], [vindr.label_names.index(c) for c in vindr.main_classes]
+    val_loader = lambda: data.eval_loader(ds_ev, va, bs, nw, pin)
+    ram0, t0, t_val = runtime.ram_gb(), time.time(), dict(do_lr=0.0, seed=0.0)
+    if dev == 'cuda': torch.cuda.reset_peak_memory_stats()
+
+    def on_epoch_val(tag):
+        def f(epoch, done):
+            t = time.time()
+            training.evaluate(done, backbone, val_loader(), y_val, main_idx)
+            t_val[tag] += time.time() - t
+            log(f'  [{tag}] epoch {epoch:>2}/{main.epochs_phase1}: {len(done)} dau | AUROC val tot nhat theo loai '
+                + ', '.join(f'{ty} {selection.max_finite([r.val_auroc[-1] for r in done if r.head_type == ty]):.4f}' for ty in HEAD_TYPES)
+                + f' | {(time.time() - t0) / 60:.1f} phut')
+        return f
+
+    def on_epoch_phase2(epoch, done):
+        if epoch % 5 == 0 or epoch == main.epochs_phase2:
+            log(f'  [pha 2] epoch {epoch:>2}/{main.epochs_phase2}: {len(done)} dau | loss train TB theo loai '
+                + ', '.join(f'{ty} {np.mean([r.train_loss[-1] for r in done if r.head_type == ty]):.3f}' for ty in HEAD_TYPES)
+                + f' | {(time.time() - t0) / 60:.1f} phut')
+
+    log(f'86b {backbone.name}: (1) do lr {len(HEAD_TYPES)} x {len(protocol.lr_grid)} dau, seed 0, {main.epochs_phase1} epoch x {spe1} buoc tren train '
+        f'{len(tr):,} anh | (2) them {main.n_seeds - 1} seed x {len(HEAD_TYPES)} dau o lr chon | (3) pha 2: {main.n_seeds * len(HEAD_TYPES)} dau hoc tiep '
+        f'{main.epochs_phase2} epoch x {spe2} buoc tren train + val {len(trva):,} anh | (4) du doan test {len(te):,} anh MOT lan | kho anh {vindr.store} | '
+        f'{nw} worker | RAM trong / tong {ram0[0]} / {ram0[1]} GB')
+    # ---- (1) dò lr ----
+    search = [training.new_run(t, lr, config.head_seed(protocol, main.epochs_phase1, t, i, 0), n1, dim, n_cls, dev, protocol, seed_index=0)
+              for t in HEAD_TYPES for i, lr in enumerate(protocol.lr_grid)]
+    tim_search, _ = train_parallel(search, backbone, ds_tr, tr, vindr.labels, protocol, n1, spe1, on_epoch_val('do_lr'), num_workers=nw)
+    best = {t: selection.best_run([r for r in search if r.head_type == t]) for t in HEAD_TYPES}
+    assert all(best.values()), f'khong chon duoc lr cho {[t for t, r in best.items() if r is None]} (moi lr phan ky) -> loi ky thuat. DUNG'
+    log(f"\n=== lr chon (AUROC val 28 nhan lan cham cuoi, ngu nghia torchmetrics 0.10.3; AP = bac thang, AUPRC = hinh thang) ===")
+    for t, r in best.items():
+        log(f"{t:<6} lr {r.lr:<7g} AUROC 28 {r.val_auroc[-1]:.4f} | AP 28 {r.val_ap[-1]:.4f} | AUPRC {r.val_auprc[-1]:.4f} | AUROC 21 "
+            f"{r.val_auroc_main[-1]:.4f}" + (' | ⚠ lr o MEP luoi' if r.lr in (protocol.lr_grid[0], protocol.lr_grid[-1]) else ''))
+    # ---- (2) thêm seed ở lr đã chọn ----
+    seeds = [training.new_run(t, best[t].lr, config.head_seed(protocol, main.epochs_phase1, t, protocol.lr_grid.index(best[t].lr), k), n1, dim, n_cls,
+                              dev, protocol, seed_index=k) for k in range(1, main.n_seeds) for t in HEAD_TYPES]
+    tim_seed, _ = train_parallel(seeds, backbone, ds_tr, tr, vindr.labels, protocol, n1, spe1, on_epoch_val('seed'), num_workers=nw)
+    order = [(t, k) for t in HEAD_TYPES for k in range(main.n_seeds)]
+    phase1 = {**{(t, 0): best[t] for t in HEAD_TYPES}, **{(r.head_type, r.tags['seed_index']): r for r in seeds}}
+    assert sorted(phase1) == sorted(order), 'thieu dau pha 1 cho mot (loai, seed) -> DUNG'
+    # ---- (3) chẩn đoán đường học (§5.2, chỉ mô tả) + dự đoán val cuối pha 1 ----
+    diag = {f'{t}|s{k}': selection.learning_curve_summary(phase1[(t, k)].val_auroc, phase1[(t, k)].train_loss, curve.drop_threshold, curve.gain_window)
+            for t, k in order}
+    log(f"\n=== chan doan duong hoc pha 1 (§5.2, CHI mo ta; co khi giam sau dinh > {curve.drop_threshold}) ===")
+    for name, c in diag.items():
+        if not c['finite']:
+            log(f'{name:<9} ⚠ duong val co NaN / Inf (phan ky) -> xu ly ky thuat, khong phai chan doan duong hoc'); continue
+        fm = lambda v, spec: '-' if v is None else format(v, spec)
+        log(f"{name:<9} dinh {c['peak_auroc']:.4f} (epoch {c['peak_epoch']:>2}) | cuoi {c['last_auroc']:.4f} | giam {c['drop_after_peak']:.4f} | tang "
+            f"{curve.gain_window} epoch cuoi {fm(c['gain_last'], '+.4f')} | loss train dinh / cuoi {fm(c['train_loss_at_peak'], '.2f')} / "
+            f"{fm(c['train_loss_last'], '.2f')}" + (' | val_drop_after_peak' if c['val_drop_after_peak'] else ''))
+    p_val = training.predict([phase1[o] for o in order], backbone, val_loader())
+    # ---- (4) pha 2: học tiếp trên train + val ----
+    phase2 = [training.continue_run(phase1[o], n2, protocol, main.phase2_seed_offset, phase=2) for o in order]
+    tim_p2, _ = train_parallel(phase2, backbone, ds_tr, trva, vindr.labels, protocol, n2, spe2, on_epoch_phase2, num_workers=nw)
+    # ---- (5) dự đoán test MỘT lần ----
+    p_test = training.predict(phase2, backbone, data.eval_loader(ds_ev, te, bs, nw, pin))
+    finite = bool(all(np.isfinite(p).all() for p in p_val + p_test))
+    steps_ok = all(r.step == r.max_steps for r in search + seeds + phase2)
+    toc_do = dict(do_lr=_timing(tim_search, t_val['do_lr']), seed=_timing(tim_seed, t_val['seed']), pha2=_timing(tim_p2, 0.0),
+                  phut_tong=(time.time() - t0) / 60, gpu_gb_dinh=(torch.cuda.max_memory_allocated() / 1e9 if dev == 'cuda' else None),
+                  thiet_bi=runtime.device_name(dev), so_worker=nw, ram_gb_trong_dau_cuoi=[ram0[0], runtime.ram_gb()[0]], ram_gb_tong=ram0[1])
+    log(f"\nxong: {'✓' if steps_ok else '⚠'} so buoc dung | {'✓' if finite else '⚠'} du doan val + test huu han | du doan test {len(p_test)} dau x "
+        f"{p_test[0].shape} (CHUA cham — o notebook bang) | tong {toc_do['phut_tong']:.1f} phut | GPU dinh "
+        + (f"{toc_do['gpu_gb_dinh']:.1f} GB" if toc_do['gpu_gb_dinh'] is not None else '-'))
+    arrays = {f'val_{t}_s{k}': p.astype(np.float32) for (t, k), p in zip(order, p_val)}
+    arrays.update({f'test_{t}_s{k}': p.astype(np.float32) for (t, k), p in zip(order, p_test)})
+    arrays.update(y_val=vindr.labels[va].astype(np.float32), y_test=vindr.labels[te].astype(np.float32), idx_val=va.astype(np.int64),
+                  idx_test=te.astype(np.int64))
+    sp = backbone.spec
+    result = dict(
+        t=datetime.datetime.now().strftime('%Y%m%d_%H%M%S'), run=run_tag, commit_chexfound=config.CHEXFOUND_COMMIT,
+        goi_sha=getattr(vindr_protocol, 'GOI_SHA', None), goi_phien_ban=vindr_protocol.__version__, bb=backbone.name, nguon_bb=backbone.source,
+        kho_anh=vindr.store, kich=sp.image_size, mean=[float(v) for v in sp.mean], std=[float(v) for v in sp.std], amp_backbone=str(backbone.amp),
+        tf32_dau=True, luoi=list(protocol.lr_grid), lo=bs, chia=protocol.loss_divisor, wd=protocol.weight_decay, hat_du_lieu=protocol.data_seed,
+        hat_dau=protocol.head_seed, so_seed=main.n_seeds, lech_hat_pha2=main.phase2_seed_offset,
+        epoch=dict(pha1=main.epochs_phase1, pha2=main.epochs_phase2), buoc_moi_epoch=dict(pha1=spe1, pha2=spe2),
+        tong_buoc=dict(pha1=n1, pha2=n2, moi_dau=n1 + n2), n_train=len(tr), n_val=len(va), n_test=len(te), md5_khoa=data.md5_keys(vindr.keys),
+        md5_khoa_test=data.md5_keys([vindr.keys[i] for i in te]), nhan=list(vindr.label_names), lop_chinh=list(vindr.main_classes),
+        do_lr={r.name: _curves(r) for r in search},
+        chon={t: dict(lr=r.lr, auc=r.val_auroc[-1], ap=r.val_ap[-1], auprc=r.val_auprc[-1], auc21=r.val_auroc_main[-1],
+                      mep_luoi=r.lr in (protocol.lr_grid[0], protocol.lr_grid[-1])) for t, r in best.items()},
+        them_seed={r.name: _curves(r) for r in seeds}, duong_hoc=diag, chan_doan=dict(nguong_giam=curve.drop_threshold, cua_so_tang=curve.gain_window),
+        pha2={f'{t}|s{k}': dict(hat=r.seed, loss=r.train_loss, buoc=r.step) for (t, k), r in zip(order, phase2)},
+        kiem=dict(dac_trung_tang_cuoi=gate['lech'], dau_phan_ky_do_lr=[r.name for r in search if not np.isfinite(r.val_auroc).all()],
+                  so_buoc_dung=steps_ok, du_doan_huu_han=finite),
+        toc_do=toc_do, mang=sorted(arrays), nguon=vindr.sources,
+        ghi_chu='PLAN_86 4.4: luot chinh; du doan test MOT lan sau pha 2, CHUA cham (notebook bang 86d).')
+    if extra: result.update(extra)
+    return result, arrays

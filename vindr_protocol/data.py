@@ -23,6 +23,26 @@ STORES = {
                 train={k: ('stage4_nb85e', f'r85e_vindr_train_p{k}_khong_cb') for k in (1, 2, 3)}),
 }
 N_LABELS, N_MAIN_CLASSES, MIN_TEST_POSITIVES, IMAGE_SIDE = 28, 21, 10, 518
+RESULT_85J, SUFFIX_KCB = ('stage4_nb85j', 'r85j_tien_xu_ly'), '_khong_cb'      # phép kiểm tiền xử lý của 85 (PLAN_85 §4.8)
+
+
+def image_store_from_85j(kiem_ke, tai, xung_dot, row, head='ml', log=print):
+    '''Kiểu ảnh của MỘT hàng SOTA theo luật val của 85j (PLAN_86 §4.1: kiểu 85j chọn cho đầu ML-Decoder của hàng đó; không chọn lại theo test):
+       đọc kiem_tien_xu_ly_<thời điểm>.json MỚI NHẤT, khoá chon['<row> | <head>'] = '<row>' (cân bằng) hoặc '<row>_khong_cb'.
+       -> ('cb' | 'kcb', nguồn). Chưa có kết quả 85j -> DỪNG.'''
+    kk = kiem_ke(RESULT_85J, mau=r'kiem_tien_xu_ly_\d{8}_\d{6}\.json')[1]
+    assert kk, f"chua co ket qua 85j ({'/'.join(RESULT_85J)}/kiem_tien_xu_ly_*.json) -> chay 85j truoc (PLAN_86 4.1). DUNG"
+    name = sorted(kk)[-1]
+    versions = kk[name]
+    if xung_dot(versions): log(f"  ! {name}: {len(versions)} ban NOI DUNG KHAC -> dung ban MOI NHAT ({versions[0]['mt']})")
+    with open(tai(versions[0]), encoding='utf-8') as f: res = json.load(f)
+    key = f'{row} | {head}'
+    assert key in res.get('chon', {}), f'85j khong co lua chon cho {key!r} -> DUNG'
+    choice = res['chon'][key]
+    assert choice in (row, row + SUFFIX_KCB), f'85j: lua chon {choice!r} cho {key!r} khong phai {row!r} / {row + SUFFIX_KCB!r} -> DUNG'
+    store = 'kcb' if choice == row + SUFFIX_KCB else 'cb'
+    return store, dict(tep='/'.join(RESULT_85J) + '/' + name, id=versions[0]['id'], md5=versions[0]['md5'], chon=choice,
+                       val=res.get('val', {}).get(key), so_tep_85j=len(kk))
 
 
 def md5_keys(keys):

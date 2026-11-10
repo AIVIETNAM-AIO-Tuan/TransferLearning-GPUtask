@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 CHEXFOUND_COMMIT = '7e288d06532f24abedb7d00781185c36727d9d69'
 HEAD_TYPES = ('lin', 'ml', 'glori')                     # Linear (CheXFound) | ML-Decoder (của 85f) | GLoRI (CheXFound)
+EPOCHS_LOCKED = 20                                      # E1 = E2 = 20: luật §5.1 trên chạy thử 86a (10/11), áp cho MỌI encoder
 LR_GRID = (1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1)   # learning_rates mặc định của linear_glori.py
 
 
@@ -47,11 +48,20 @@ class Pilot:
     check_lr: float = 1e-3                  # lr của các đầu kiểm
 
 
+@dataclass(frozen=True)
+class MainRun:
+    '''Lượt chính (86b; PLAN_86 §4.4): dò lr (seed 0) -> thêm seed ở lr đã chọn -> pha 2 học tiếp trên train + val -> dự đoán test MỘT lần.'''
+    epochs_phase1: int = EPOCHS_LOCKED      # trên train (13.500 ảnh)
+    epochs_phase2: int = EPOCHS_LOCKED      # trên train + val (15.000 ảnh)
+    n_seeds: int = 5                        # seed 0 = dò lr; 1 .. n-1 thêm ở lr đã chọn
+    phase2_seed_offset: int = 500_000       # dropout pha 2 theo (hạt đầu + offset); khởi tạo pha 2 = trọng số pha 1
+
+
 def steps_per_epoch(n_images, batch_size):
     '''= epoch_length của linear_glori.py: ceil(N / (64 x 4)).'''
     return math.ceil(n_images / batch_size)
 
 
-def head_seed(protocol, budget, head_type, lr_index):
-    '''Hạt riêng từng đầu (như 86a): head_seed + 10.000 x ngân sách + 1.000 x loại đầu + chỉ số lr.'''
-    return protocol.head_seed + 10_000 * int(budget) + 1_000 * HEAD_TYPES.index(head_type) + int(lr_index)
+def head_seed(protocol, budget, head_type, lr_index, seed_index=0):
+    '''Hạt riêng từng đầu: head_seed + 1.000.000 x chỉ số seed + 10.000 x ngân sách + 1.000 x loại đầu + chỉ số lr (seed 0 = như 86a).'''
+    return (protocol.head_seed + 1_000_000 * int(seed_index) + 10_000 * int(budget) + 1_000 * HEAD_TYPES.index(head_type) + int(lr_index))

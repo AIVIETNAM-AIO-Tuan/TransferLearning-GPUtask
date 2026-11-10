@@ -21,6 +21,12 @@ def device_and_amp(require_gpu_on_colab=True):
     return device, amp
 
 
+def device_name(device):
+    if device == 'cuda':
+        return f'{torch.cuda.get_device_name(0)} | {torch.cuda.get_device_properties(0).total_memory / 1e9:.0f} GB'
+    return 'cpu'
+
+
 def allow_tf32_heads():
     '''Đầu đọc học ở fp32 như mã gốc; CHO PHÉP TF32 matmul (PLAN_86 §4.4).'''
     torch.set_float32_matmul_precision('high')
