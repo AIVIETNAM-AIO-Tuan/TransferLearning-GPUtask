@@ -137,11 +137,12 @@ def run_phase1_pilot(vindr, backbone, protocol=config.Protocol(), pilot=config.P
     best = {(E, t): selection.best_run([r for r in runs if r.tags['budget'] == E and r.head_type == t]) for E in pilot.budgets for t in HEAD_TYPES}
     e_lock, diff = selection.epoch_rule(best, pilot.budgets, pilot.epoch_rule_threshold) if all(best.values()) else (None, {})
     log(f"\n=== chon lr (AUROC val 28 nhan lan cham cuoi, ngu nghia torchmetrics 0.10.3) | dau phan ky (val NaN): {len(kiem['dau_phan_ky'])} ===")
-    log(f"{'loai':<7}{'E':>4}{'lr':>9}{'AUROC 28':>10}{'AP 28':>8}{'AUROC 21':>10}{'hoi tu':>8}  duong AUROC val (lr chon, tung epoch)")
+    log(f"{'loai':<7}{'E':>4}{'lr':>9}{'AUROC 28':>10}{'AP 28':>8}{'AUPRC':>8}{'AUROC 21':>10}{'hoi tu':>8}  duong AUROC val (lr chon, tung epoch)"
+        "   [AP = AP bac thang = 'AUPRC' cua bai CheXFound; AUPRC = hinh thang, bao kem nhu 85]")
     for (E, t), r in best.items():
         if r is None:
             log(f'{t:<7}{E:>4}  ⚠ KHONG dau nao co AUROC val > 0'); continue
-        log(f"{t:<7}{E:>4}{r.lr:>9g}{r.val_auroc[-1]:>10.4f}{r.val_ap[-1]:>8.4f}{r.val_auroc_main[-1]:>10.4f}"
+        log(f"{t:<7}{E:>4}{r.lr:>9g}{r.val_auroc[-1]:>10.4f}{r.val_ap[-1]:>8.4f}{r.val_auprc[-1]:>8.4f}{r.val_auroc_main[-1]:>10.4f}"
             f"{('co' if selection.converged(r, pilot.convergence_threshold) else 'KHONG'):>8}  " + ' '.join(f'{v:.3f}' for v in r.val_auroc)
             + (' | ⚠ lr o MEP luoi' if r.lr in (protocol.lr_grid[0], protocol.lr_grid[-1]) else ''))
     if e_lock is not None:
@@ -181,8 +182,8 @@ def run_phase1_pilot(vindr, backbone, protocol=config.Protocol(), pilot=config.P
         wd=protocol.weight_decay, hat_du_lieu=protocol.data_seed, hat_dau=protocol.head_seed, n_train=len(tr), n_val=len(va), buoc_moi_epoch=spe,
         tong_buoc={str(E): E * spe for E in pilot.budgets}, md5_khoa=data.md5_keys(vindr.keys), nhan=list(vindr.label_names),
         lop_chinh=list(vindr.main_classes), kho_anh=vindr.store,
-        duong={r.name: dict(auc=r.val_auroc, ap=r.val_ap, auc21=r.val_auroc_main, loss=r.train_loss) for r in runs},
-        chon={f'{E}|{t}': (None if r is None else dict(lr=r.lr, auc=r.val_auroc[-1], ap=r.val_ap[-1], auc21=r.val_auroc_main[-1],
+        duong={r.name: dict(auc=r.val_auroc, ap=r.val_ap, auprc=r.val_auprc, auc21=r.val_auroc_main, loss=r.train_loss) for r in runs},
+        chon={f'{E}|{t}': (None if r is None else dict(lr=r.lr, auc=r.val_auroc[-1], ap=r.val_ap[-1], auprc=r.val_auprc[-1], auc21=r.val_auroc_main[-1],
                                                        hoi_tu=selection.converged(r, pilot.convergence_threshold)))
               for (E, t), r in best.items()},
         luat_epoch=dict(chenh=diff, nguong=pilot.epoch_rule_threshold, e_chot=e_lock), kiem=kiem, kiem_dat=kiem_dat, toc_do=toc_do,

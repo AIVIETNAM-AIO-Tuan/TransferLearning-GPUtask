@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from .heads import build_head, run_head
-from .metrics import ap_auroc_tm0103
+from .metrics import ap_auroc_tm0103, auprc_trapezoid
 
 PREDICT_SEED_OFFSET = 10 ** 7          # dropout khi chấm ở chế độ train (chỉ để đo chênh lệch với mã gốc): hạt (đầu, 10^7 + lô)
 
@@ -27,8 +27,9 @@ class HeadRun:
     tags: dict = field(default_factory=dict)
     step: int = 0
     val_auroc: list = field(default_factory=list)          # macro 28 nhãn, ngữ nghĩa torchmetrics 0.10.3
-    val_ap: list = field(default_factory=list)
+    val_ap: list = field(default_factory=list)             # AP bậc thang (= "AUPRC" của bài CheXFound)
     val_auroc_main: list = field(default_factory=list)     # TB 21 lớp số chính
+    val_auprc: list = field(default_factory=list)          # AUPRC hình thang (báo kèm như 85d / 85g)
     train_loss: list = field(default_factory=list)         # loss TB từng epoch
     loss_sum: object = 0.0                                 # cộng dồn trong epoch (tensor, không đồng bộ GPU)
 
@@ -109,10 +110,12 @@ def predict(runs, backbone, loader, mode='eval'):
 
 
 def evaluate(runs, backbone, loader, labels, main_idx):
-    '''Thêm AUROC / AP (28 nhãn, torchmetrics) + AUROC TB 21 lớp số chính vào đường val của từng đầu; dự đoán không hữu hạn (phân kỳ) -> NaN.'''
+    '''Thêm AUROC / AP (28 nhãn, torchmetrics) + AUROC TB 21 lớp số chính + AUPRC hình thang (lớp hợp lệ) vào đường val của từng đầu; dự đoán
+       không hữu hạn (phân kỳ) -> NaN.'''
     for run, probs in zip(runs, predict(runs, backbone, loader)):
         if np.isfinite(probs).all():
             _, ap, auroc_cls, auroc = ap_auroc_tm0103(labels, probs)
             run.val_auroc.append(auroc); run.val_ap.append(ap); run.val_auroc_main.append(float(auroc_cls[main_idx].mean()))
+            run.val_auprc.append(auprc_trapezoid(labels, probs)[1])
         else:
-            run.val_auroc.append(float('nan')); run.val_ap.append(float('nan')); run.val_auroc_main.append(float('nan'))
+            for curve in (run.val_auroc, run.val_ap, run.val_auroc_main, run.val_auprc): curve.append(float('nan'))
