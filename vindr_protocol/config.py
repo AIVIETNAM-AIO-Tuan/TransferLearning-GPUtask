@@ -57,6 +57,22 @@ class MainRun:
     phase2_seed_offset: int = 500_000       # dropout pha 2 theo (hạt đầu + offset); khởi tạo pha 2 = trọng số pha 1
 
 
+PAPER_LR_GRID = LR_GRID[:9]                             # bài CheXFound §IV-A2: {1e-5 … 5e-3} = 9 giá trị đầu của lưới mã
+
+
+@dataclass(frozen=True)
+class PaperArms:
+    '''Nhánh SÁT BÀI CheXFound (PLAN_86 §11.3) — học song song trong lượt chính (thêm đầu; RNG đầu tách -> đầu của lượt chính không đổi), CHỈ
+       mô tả, không vào luật §4.5. Mỗi ngân sách E: E1 = E2 = E; seed 0 (mã gốc: seed = 0, một lượt); chọn lr theo AUROC val như mã (lưới 13) và
+       báo thêm lựa chọn trong lưới 9 của bài (khác nhau -> học pha 2 cả hai); dự đoán test ở mọi chế độ predict_modes:
+       'eval' = đầu đọc eval() + autocast của lượt (sửa của 86) | 'train' = dropout BẬT như evaluate() của mã gốc (F7) |
+       'train_fp16' = dropout bật + encoder autocast fp16 như mã gốc (F13) — gần cách chấm của họ nhất (đầu vẫn học trên đặc trưng của lượt).'''
+    budgets: tuple = (10, 5)                # 10 = sát bài (mặc định mã; bài: 10 epoch cho bộ lớn) | 5 = độ nhạy ngân sách (≈ số bước khi lô 512)
+    head_types: tuple = ('lin', 'glori')    # hai đầu của Bảng IV
+    paper_grid: tuple = PAPER_LR_GRID
+    predict_modes: tuple = ('eval', 'train', 'train_fp16')
+
+
 def steps_per_epoch(n_images, batch_size):
     '''= epoch_length của linear_glori.py: ceil(N / (64 x 4)).'''
     return math.ceil(n_images / batch_size)
