@@ -545,7 +545,22 @@ def train_once(kind, repo, package_dir, csv_root, checkpoint, config, out_dir, l
     args += list(extra) + ['--opts', *OPTS]
     run = run_torchrun(repo, package_dir, args, os.path.join(out_dir, 'chay.log'), log=log)
     res = read_results(out_dir) if run['ma_thoat'] == 0 else None
-    return dict(thu_muc=out_dir, lrs=list(lrs) if lrs else None, chay=run, ket_qua=res)
+    return dict(thu_muc=out_dir, lrs=list(lrs) if lrs else None, chay=run, ket_qua=res, nap=read_loading(out_dir) if ENCODER else None)
+
+
+def read_loading(out_dir):
+    '''86j: kết quả kiểm nạp trọng số do CHÍNH tiến trình học ghi (launch.NAP_FILE) -> dict, hoặc None nếu không có tệp (tiến trình chưa tới bước dựng
+       mô hình) — bên gọi coi None là KHÔNG đạt.'''
+    from .launch import NAP_FILE
+    path = os.path.join(out_dir, NAP_FILE)
+    if not os.path.exists(path): return None
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _loading_ok(run):
+    '''Lượt không encoder (CheXFound): luôn đạt ở đây (nạp theo hàm của họ). Lượt encoder: phải có tệp kiểm nạp và nap['dat'] là True.'''
+    return ENCODER is None or bool(run.get('nap') and run['nap'].get('dat') is True)
 
 
 def phase1_choice(results):
@@ -586,6 +601,7 @@ def run_head(kind, repo, package_dir, csv_root, checkpoint, config, out_root, lo
             runs = halves()
     for r in runs:
         assert r['chay']['ma_thoat'] == 0, f"hoc {kind} ({r['thu_muc']}) THAT BAI:\n{r['chay']['duoi_log']}"
+        assert _loading_ok(r), f"hoc {kind} ({r['thu_muc']}): kiem nap trong so encoder {ENCODER} KHONG dat / khong co tep: {r.get('nap')} -> DUNG"
     checks = [check_run(r, csv_root) for r in runs]
     for r, c in zip(runs, checks):
         assert c['val']['dat'] and c['test']['dat'], (f"{r['thu_muc']}: cong lan cham KHONG dat (val {c['val']}, test {c['test']}) -> DUNG, gui Claude")
@@ -594,8 +610,8 @@ def run_head(kind, repo, package_dir, csv_root, checkpoint, config, out_root, lo
     winner = runs[k]
     test_blocks = [b for b in winner['ket_qua'] if b['tach'] == 'test']
     pred_path = _write_test_predictions(winner['thu_muc'], checks[k]['du_doan_test'])
-    return dict(loai=kind, luot=[dict(thu_muc=r['thu_muc'], lrs=r['lrs'], phut=r['chay']['phut'], chon=c, cong={s: x[s] for s in ('val', 'test')})
-                                 for r, c, x in zip(runs, choices, checks)],
+    return dict(loai=kind, luot=[dict(thu_muc=r['thu_muc'], lrs=r['lrs'], phut=r['chay']['phut'], chon=c, cong={s: x[s] for s in ('val', 'test')},
+                                      nap=r.get('nap')) for r, c, x in zip(runs, choices, checks)],
                 thang=k, chon=choices[k], hai_nua=len(runs) > 1, hai_nua_bat_buoc=forced, encoder=ENCODER, anh=IMAGE_SIZE,
                 test_ho_ghi_cuoi_pha2=(test_blocks[-1] if test_blocks else None),
                 cong={s: checks[k][s] for s in ('val', 'test')}, du_doan=pred_path, phut_tong=(time.time() - t0) / 60)
@@ -619,9 +635,9 @@ def smoke_test(repo, package_dir, csv_root, checkpoint, config, out_root, log=pr
     c = check_run(r, small)
     preds, target = c['du_doan_test']
     ok = (preds.shape == (sizes['test'], len(sizes['class_names'])) and c['val']['dat'] and c['test']['dat'] and c['val']['so_dau'] == 2
-          and int(target.sum()) > 0)
+          and int(target.sum()) > 0 and _loading_ok(r))
     return dict(dat=bool(ok), hinh_du_doan=list(preds.shape), khoi=[(b['buoc'], b['tach']) for b in r['ket_qua']], phut=r['chay']['phut'],
-                cong={s: c[s] for s in ('val', 'test')})
+                cong={s: c[s] for s in ('val', 'test')}, nap=r.get('nap'))
 
 
 # ---- lưu / khôi phục từng loại đầu qua tệp resume của khối ghi cuối (ghi() chỉ local; dong_bo() tải lên MỘT lượt cuối; tệp resume ghi đè) ----

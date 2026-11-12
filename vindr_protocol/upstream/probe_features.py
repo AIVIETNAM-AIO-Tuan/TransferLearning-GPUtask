@@ -8,7 +8,8 @@ Không import vindr_protocol; chỉ cú pháp / API có ở Python 3.9 + torch 2
     python probe_features.py --repo R --encoder TEN --pkg GOI --input X.npy --out Y.npz --amp fp16|none [--device cuda|cpu]
 
 --amp none: fp32 với TF32 tắt (tham chiếu). --device cpu: chỉ để kiểm trên máy (autocast cpu = bf16). --encoder (86j, PLAN_86 §16): lớp bọc
-vindr_protocol.upstream.encoders_ho thay CheXFound (cần --pkg = thư mục chứa vindr_protocol); lớp bọc không có token patch (BiomedCLIP) -> chỉ lưu cls."""
+vindr_protocol.upstream.encoders_ho thay CheXFound (cần --pkg = thư mục chứa vindr_protocol); lớp bọc không có token patch (BiomedCLIP) -> chỉ lưu cls;
+info['nap'] = kết quả kiểm nạp trọng số THẬT của encoders_ho (thông tin nạp của thư viện + so từng tensor với tệp), thieu_khoa = số khoá thiếu đo được."""
 import json, sys, time, warnings
 
 
@@ -34,8 +35,9 @@ def main():
         assert pkg, '--encoder can --pkg (thu muc chua vindr_protocol)'
         sys.path.insert(0, pkg)
         from vindr_protocol.upstream import encoders_ho
-        model = encoders_ho.build(encoder)
-        info.update(thieu_khoa=0)
+        model = encoders_ho.build(encoder, check=False)          # kiểm nạp THẬT trong tiến trình này; trượt -> ghi lại, run_features báo không đạt
+        t = model.nap['thong_tin_nap']
+        info.update(nap=model.nap, thieu_khoa=(len(t['thieu']) if t else 0) + model.nap['so_voi_tep']['so_thieu'])
     else:
         from omegaconf import OmegaConf
         from chexfound.configs import dinov2_default_config

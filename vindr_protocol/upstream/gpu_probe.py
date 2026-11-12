@@ -124,7 +124,7 @@ def make_feature_input(vindr, out_npy, n=FEATURE_IMAGES, size=512):
 def run_features(out_npz, repo, config, ckpt, input_npy, amp, python=None, isolated=True, device='cuda', opts=('student.block_chunks=4',),
                  timeout_s=FEAT_TIMEOUT_S, encoder=None, pkg=None):
     '''probe_features.py bằng `python` -> dict(dat, info, ma_thoat, phut, duoi_loi, tep). encoder (86j): lớp bọc encoders_ho thay CheXFound (pkg =
-       thư mục chứa vindr_protocol; config / ckpt bỏ qua).'''
+       thư mục chứa vindr_protocol; config / ckpt bỏ qua); dat còn đòi cổng nạp trọng số THẬT của encoders_ho (info['nap']['dat'] — 13/11).'''
     cmd = [python or sys.executable, FEAT_SCRIPT, '--repo', repo, '--input', input_npy, '--out', out_npz, '--amp', amp, '--device', device]
     if encoder:
         cmd += ['--encoder', encoder, '--pkg', pkg or os.path.dirname(os.path.dirname(HERE))]
@@ -132,11 +132,13 @@ def run_features(out_npz, repo, config, ckpt, input_npy, amp, python=None, isola
         cmd += ['--config', config, '--ckpt', ckpt, '--opts', *opts]
     t0 = time.time()
     try:
-        r = subprocess.run(cmd, env=child_env(isolated and python is not None), capture_output=True, text=True, timeout=timeout_s)
+        # utf-8 + replace: thanh tiến độ của transformers 5.x (ký tự khối) giải mã theo locale cp1252 (máy Windows) làm mất đuôi lỗi (13/11)
+        r = subprocess.run(cmd, env=child_env(isolated and python is not None), capture_output=True, text=True, encoding='utf-8', errors='replace',
+                           timeout=timeout_s)
     except subprocess.TimeoutExpired as e:
         return dict(dat=False, qua_gio=True, info=None, ma_thoat=None, phut=(time.time() - t0) / 60, duoi_loi=str(e)[-500:], tep=out_npz)
     info = json.loads(r.stdout.split('DT=')[-1].strip().splitlines()[0]) if (r.returncode == 0 and 'DT=' in r.stdout) else None
-    ok = bool(info and info['huu_han'] and info['thieu_khoa'] == 0)
+    ok = bool(info and info['huu_han'] and info['thieu_khoa'] == 0 and (not encoder or (info.get('nap') or {}).get('dat') is True))
     return dict(dat=ok, qua_gio=False, info=info, ma_thoat=r.returncode, phut=(time.time() - t0) / 60, duoi_loi=(r.stderr or '')[-3000:], tep=out_npz)
 
 
@@ -159,11 +161,11 @@ def compare_features(ref_npz, test_npz):
     return out
 
 
-ENCODER_GATE = dict(lech=2e-2, cos_min=0.999)        # §16.4: lớp bọc ở môi trường cũ (fp16) so tham chiếu fp32 môi trường mới (ngưỡng fp16 như §15.2)
+ENCODER_GATE = dict(lech=2e-2, cos_min=0.999)        # §16.4 (sửa 13/11): lớp bọc ở môi trường cũ fp16 so fp32 CÙNG môi trường cũ (ngưỡng fp16 như §15.2)
 
 
 def encoder_gate(cmp):
-    '''86j §16.4: -> dict(dat, ...) từ compare_features(tham chiếu fp32 môi trường mới, môi trường cũ fp16).'''
+    '''86j §16.4: -> dict(dat, ...) từ compare_features(môi trường cũ fp32 = tham chiếu, môi trường cũ fp16). Cổng nạp trọng số nằm ở run_features.'''
     return dict(dat=bool(cmp['lech_tuong_doi'] <= ENCODER_GATE['lech'] and cmp['cos_min'] >= ENCODER_GATE['cos_min']), luat=dict(ENCODER_GATE),
                 lech=cmp['lech_tuong_doi'], cos_min=cmp['cos_min'], phan=cmp['phan'])
 

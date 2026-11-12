@@ -20,8 +20,10 @@ Mỗi tệp một trách nhiệm:
                        86h: môi trường của họ trên G4 — phép tính thật + đối chứng môi trường mới, đặc trưng ba lượt, chạy thử, luật kết luận
                        (gpu_probe + hai kịch bản chạy trong tiến trình riêng: probe_ops, probe_features; §15);
                        86j: encoder KHÁC qua mã + môi trường của họ — lớp bọc encoders_ho (RAD-DINO kiểu họ / chuẩn, BiomedCLIP của họ), tệp
-                       chạy thay setup_and_build_model (launch.inject_encoder), GLoRI hai nửa bắt buộc, report.run_encoder (§16)
+                       chạy thay setup_and_build_model (launch.inject_encoder), GLoRI hai nửa bắt buộc, report.run_encoder (§16);
+                       0.8.1: cổng nạp trọng số THẬT của lớp bọc trong mọi tiến trình (thông tin nạp của thư viện + từng tensor = tệp;
+                       nap_encoder.json mỗi lượt học) — thay thieu_khoa = 0 cố định (§16.4)
 
 Notebook chỉ gọi hàm; khối Drive chuẩn (khoi_doc_drive / khoi_ghi_drive / khoi_ghi_cuoi) vẫn ở ô C0 của notebook và được truyền vào
 dưới dạng hàm (kiem_ke, tai, xung_dot, ghi, ghi_json) — gói không chứa ID Drive."""
-__version__ = '0.8.0'
+__version__ = '0.8.1'

@@ -10,12 +10,13 @@ Chỉ làm hai việc (thêm việc 3 ở 86j) trước khi gọi main() của h
      tính (metric.compute) ghi kèm. Phép tính, thứ tự gọi, chế độ train / eval của đầu đọc và RNG không đổi (chỉ chép tensor ra CPU).
      Mỗi lần chấm -> <output-dir>/cham/<thứ tự>_<tách>_iter<k>.npz (target + preds từng đầu) + .json (tên đầu, số họ tính, prefixstring).
   3. (86j, PLAN_86 §16; chỉ khi đặt biến VP_ENCODER) thay mô hình CheXFound bằng lớp bọc encoders_ho trong setup_and_build_model — vẫn setup(args) +
-     autocast fp16 theo config của họ (inject_encoder)."""
+     autocast fp16 theo config của họ (inject_encoder); kết quả kiểm nạp trọng số của CHÍNH tiến trình học -> <output-dir>/nap_encoder.json, trượt -> dừng."""
 import json
 import os
 import sys
 
 EVAL_DIR = 'cham'
+NAP_FILE = 'nap_encoder.json'     # 86j: kết quả kiểm nạp trọng số (encoders_ho.build) của tiến trình học — runner đọc lại, cổng + ghi vào kết quả
 
 
 def register_vindr():
@@ -96,7 +97,12 @@ def inject_encoder(linear_glori, name):
     def setup_and_build_model(args):
         cudnn.benchmark = True                                   # như hàm gốc
         config = ev_setup.setup(args)
-        model = encoders_ho.build(name)
+        model = encoders_ho.build(name, check=False)
+        if int(os.environ.get('RANK', '0')) == 0:                # ghi kết quả kiểm nạp TRƯỚC khi quyết (trượt vẫn để lại bằng chứng)
+            with open(os.path.join(args.output_dir, NAP_FILE), 'w', encoding='utf-8') as f:
+                json.dump(model.nap, f, ensure_ascii=False, indent=1)
+        print('NAP_ENCODER ' + encoders_ho.loading_text(model.nap), flush=True)
+        assert model.nap['dat'], f'{name}: nap trong so KHONG dat -> DUNG (xem {NAP_FILE})'
         model.cuda()
         return model, ev_setup.get_autocast_dtype(config)
     setup_and_build_model._encoder = name
