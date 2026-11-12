@@ -220,6 +220,64 @@ def _unique_runs(runs):
     return out
 
 
+# ---- nhánh sát bài (PLAN_86 §11.3) — dùng chung cho run_main (học cùng lượt chính) và run_paper_only (CHỈ nhánh sát bài, §14.2) ----
+def _paper_check(paper, protocol, max_epochs=None):
+    assert (all(0 < E <= (max_epochs or E) for E in paper.budgets) and set(paper.head_types) <= set(HEAD_TYPES)
+            and tuple(paper.paper_grid) == tuple(protocol.lr_grid[:len(paper.paper_grid)])
+            and set(paper.predict_modes) <= {'eval', 'train', 'train_fp16'}), f'cau hinh nhanh sat bai {paper} sai -> DUNG'
+
+
+def _paper_arms(paper, protocol, spe1, dim, n_cls, dev):
+    '''Đầu nhánh sát bài: loại x 13 lr x ngân sách, chỉ số seed 0, hạt head_seed(E, loại, lr), cosine theo ngân sách của nó.'''
+    return [training.new_run(t, lr, config.head_seed(protocol, E, t, i, 0), E * spe1, dim, n_cls, dev, protocol, arm='paper', budget=E, seed_index=0)
+            for E in paper.budgets for t in paper.head_types for i, lr in enumerate(protocol.lr_grid)]
+
+
+def _paper_choose(arms, paper, protocol, log):
+    '''Chọn lr mỗi (ngân sách, loại): lưới 13 và lưới 9 của bài theo AUROC val lần chấm cuối (hoà -> lr nhỏ). -> {(E, loại): {g13, g9}}.'''
+    log(f"\n=== nhanh SAT BAI: lr chon theo AUROC val 28 nhan lan cham cuoi (luoi 13 = mac dinh ma; luoi 9 = bai {paper.paper_grid[0]:g} .. "
+        f"{paper.paper_grid[-1]:g}) — CHI mo ta ===")
+    choice = {}
+    for E in paper.budgets:
+        for t in paper.head_types:
+            rs = [r for r in arms if r.tags['budget'] == E and r.head_type == t]
+            c = dict(g13=selection.best_run(rs), g9=selection.best_run([r for r in rs if r.lr in paper.paper_grid]))
+            assert all(c.values()), f'nhanh sat bai E={E} {t}: khong chon duoc lr (moi lr phan ky) -> loi ky thuat. DUNG'
+            choice[(E, t)] = c
+            for g, r in c.items():
+                grid = protocol.lr_grid if g == 'g13' else paper.paper_grid
+                log(f"E={E:<3}{t:<6}{g:<4} lr {r.lr:<7g} AUROC 28 {r.val_auroc[-1]:.4f} | AP 28 {r.val_ap[-1]:.4f} | AUPRC {r.val_auprc[-1]:.4f} | "
+                    f"AUROC 21 {r.val_auroc_main[-1]:.4f}" + (' | ⚠ lr o MEP luoi' if r.lr in (grid[0], grid[-1]) else '')
+                    + (' | = luoi 13' if g == 'g9' and r is c['g13'] else ''))
+    return choice
+
+
+def _paper_predict_test(paper_p2, backbone, ds_ev, te, bs, nw, pin, modes):
+    '''Dự đoán test của đầu sát bài pha 2 ở mọi chế độ: 'eval' | 'train' (dropout bật) | 'train_fp16' (dropout bật + encoder fp16). -> {chế độ: [mảng]}.'''
+    import dataclasses
+    out = {}
+    for mode in (modes if paper_p2 else ()):
+        bb_mode = dataclasses.replace(backbone, amp=torch.float16) if mode == 'train_fp16' else backbone
+        out[mode] = training.predict(paper_p2, bb_mode, data.eval_loader(ds_ev, te, bs, nw, pin), mode=('eval' if mode == 'eval' else 'train'))
+    return out
+
+
+def _paper_result(paper, protocol, arms, choice, diag, paper_p2, spe1, spe2, note):
+    pick = lambda r, grid: dict(lr=r.lr, khoa=_paper_key(r), auc=r.val_auroc[-1], ap=r.val_ap[-1], auprc=r.val_auprc[-1], auc21=r.val_auroc_main[-1],
+                                mep_luoi=r.lr in (grid[0], grid[-1]))
+    return dict(
+        cau_hinh=dict(ngan_sach=list(paper.budgets), loai_dau=list(paper.head_types), luoi_bai=list(paper.paper_grid), che_do=list(paper.predict_modes),
+                      seed=0, buoc_moi_dau={str(E): dict(pha1=E * spe1, pha2=E * spe2) for E in paper.budgets}),
+        do_lr={r.name: _curves(r) for r in arms},
+        chon={f'E{E}|{t}': dict(g13=pick(c['g13'], protocol.lr_grid), g9=pick(c['g9'], paper.paper_grid), trung=c['g9'] is c['g13'])
+              for (E, t), c in choice.items()},
+        duong_hoc=diag, pha2={_paper_key(r): dict(hat=r.seed, loss=r.train_loss, buoc=r.step) for r in paper_p2}, ghi_chu=note)
+
+
+_PAPER_NOTE_MAIN = ('PLAN_86 11.3: nhanh SAT BAI CheXFound (hoc cung luot, CHI mo ta, khong vao luat 4.5); mang val_paper_<khoa> (eval) + '
+                    'test_paper_<khoa>_<che do>.')
+
+
 def run_main(vindr, backbone, protocol=config.Protocol(), main=config.MainRun(), curve=config.CurveDiagnostic(), num_workers=None, run_tag='',
              extra=None, log=print, paper=None):
     '''LƯỢT CHÍNH cho MỘT backbone (PLAN_86 §4.4, §5.2):
@@ -234,8 +292,6 @@ def run_main(vindr, backbone, protocol=config.Protocol(), main=config.MainRun(),
        định None = lượt chính y như 86b_raddino.
        Cổng trước vòng học ném lỗi; không chọn được lr cho một loại đầu (mọi lr phân kỳ) = lỗi kỹ thuật -> ném lỗi.
        -> (kết quả ghi JSON được, mảng dự đoán {tên: ndarray float32} để lưu .npz).'''
-    import dataclasses
-
     import vindr_protocol
     nw = runtime.default_num_workers() if num_workers is None else num_workers
     dev, pin, bs = backbone.device, backbone.device == 'cuda', protocol.batch_size
@@ -284,11 +340,8 @@ def run_main(vindr, backbone, protocol=config.Protocol(), main=config.MainRun(),
               for t in HEAD_TYPES for i, lr in enumerate(protocol.lr_grid)]
     arms = []
     if paper is not None:
-        assert (all(0 < E <= min(main.epochs_phase1, main.epochs_phase2) for E in paper.budgets) and set(paper.head_types) <= set(HEAD_TYPES)
-                and tuple(paper.paper_grid) == tuple(protocol.lr_grid[:len(paper.paper_grid)])
-                and set(paper.predict_modes) <= {'eval', 'train', 'train_fp16'}), f'cau hinh nhanh sat bai {paper} sai -> DUNG'
-        arms = [training.new_run(t, lr, config.head_seed(protocol, E, t, i, 0), E * spe1, dim, n_cls, dev, protocol, arm='paper', budget=E, seed_index=0)
-                for E in paper.budgets for t in paper.head_types for i, lr in enumerate(protocol.lr_grid)]
+        _paper_check(paper, protocol, min(main.epochs_phase1, main.epochs_phase2))
+        arms = _paper_arms(paper, protocol, spe1, dim, n_cls, dev)
         log(f'nhanh SAT BAI (PLAN_86 11.3, CHI mo ta): {len(arms)} dau = {list(paper.head_types)} x {len(protocol.lr_grid)} lr x E1 = E2 '
             f'{list(paper.budgets)}, seed 0, hoc CUNG luot (dau them; RNG dau tach -> dau luot chinh khong doi)')
     assert len({r.seed for r in search + arms}) == len(search) + len(arms), 'hat dau trung -> DUNG'
@@ -299,21 +352,7 @@ def run_main(vindr, backbone, protocol=config.Protocol(), main=config.MainRun(),
     for t, r in best.items():
         log(f"{t:<6} lr {r.lr:<7g} AUROC 28 {r.val_auroc[-1]:.4f} | AP 28 {r.val_ap[-1]:.4f} | AUPRC {r.val_auprc[-1]:.4f} | AUROC 21 "
             f"{r.val_auroc_main[-1]:.4f}" + (' | ⚠ lr o MEP luoi' if r.lr in (protocol.lr_grid[0], protocol.lr_grid[-1]) else ''))
-    paper_choice = {}
-    if paper is not None:
-        log(f"\n=== nhanh SAT BAI: lr chon theo AUROC val 28 nhan lan cham cuoi (luoi 13 = mac dinh ma; luoi 9 = bai {paper.paper_grid[0]:g} .. "
-            f"{paper.paper_grid[-1]:g}) — CHI mo ta ===")
-        for E in paper.budgets:
-            for t in paper.head_types:
-                rs = [r for r in arms if r.tags['budget'] == E and r.head_type == t]
-                c = dict(g13=selection.best_run(rs), g9=selection.best_run([r for r in rs if r.lr in paper.paper_grid]))
-                assert all(c.values()), f'nhanh sat bai E={E} {t}: khong chon duoc lr (moi lr phan ky) -> loi ky thuat. DUNG'
-                paper_choice[(E, t)] = c
-                for g, r in c.items():
-                    grid = protocol.lr_grid if g == 'g13' else paper.paper_grid
-                    log(f"E={E:<3}{t:<6}{g:<4} lr {r.lr:<7g} AUROC 28 {r.val_auroc[-1]:.4f} | AP 28 {r.val_ap[-1]:.4f} | AUPRC {r.val_auprc[-1]:.4f} | "
-                        f"AUROC 21 {r.val_auroc_main[-1]:.4f}" + (' | ⚠ lr o MEP luoi' if r.lr in (grid[0], grid[-1]) else '')
-                        + (' | = luoi 13' if g == 'g9' and r is c['g13'] else ''))
+    paper_choice = _paper_choose(arms, paper, protocol, log) if paper is not None else {}
     # ---- (2) thêm seed ở lr đã chọn ----
     seeds = [training.new_run(t, best[t].lr, config.head_seed(protocol, main.epochs_phase1, t, protocol.lr_grid.index(best[t].lr), k), n1, dim, n_cls,
                               dev, protocol, seed_index=k) for k in range(1, main.n_seeds) for t in HEAD_TYPES]
@@ -342,10 +381,7 @@ def run_main(vindr, backbone, protocol=config.Protocol(), main=config.MainRun(),
     tim_p2, _ = train_parallel(phase2 + paper_p2, backbone, ds_tr, trva, vindr.labels, protocol, n2, spe2, on_epoch_phase2, num_workers=nw)
     # ---- (5) dự đoán test MỘT lần (đầu sát bài: thêm các chế độ chấm của mã gốc) ----
     p_test = training.predict(phase2, backbone, data.eval_loader(ds_ev, te, bs, nw, pin))
-    p_test_paper = {}
-    for mode in (paper.predict_modes if paper_p2 else ()):
-        bb_mode = dataclasses.replace(backbone, amp=torch.float16) if mode == 'train_fp16' else backbone
-        p_test_paper[mode] = training.predict(paper_p2, bb_mode, data.eval_loader(ds_ev, te, bs, nw, pin), mode=('eval' if mode == 'eval' else 'train'))
+    p_test_paper = _paper_predict_test(paper_p2, backbone, ds_ev, te, bs, nw, pin, paper.predict_modes if paper is not None else ())
     finite = bool(all(np.isfinite(p).all() for p in p_val + p_test + p_val_paper + sum(p_test_paper.values(), [])))
     steps_ok = all(r.step == r.max_steps for r in search + seeds + phase2 + arms + paper_p2)
     toc_do = dict(do_lr=_timing(tim_search, t_val['do_lr']), seed=_timing(tim_seed, t_val['seed']), pha2=_timing(tim_p2, 0.0),
@@ -381,16 +417,97 @@ def run_main(vindr, backbone, protocol=config.Protocol(), main=config.MainRun(),
         toc_do=toc_do, mang=sorted(arrays), nguon=vindr.sources,
         ghi_chu='PLAN_86 4.4: luot chinh; du doan test MOT lan sau pha 2, CHUA cham (notebook bang 86d).')
     if paper is not None:
-        pick = lambda r, grid: dict(lr=r.lr, khoa=_paper_key(r), auc=r.val_auroc[-1], ap=r.val_ap[-1], auprc=r.val_auprc[-1], auc21=r.val_auroc_main[-1],
-                                    mep_luoi=r.lr in (grid[0], grid[-1]))
-        result['sat_bai'] = dict(
-            cau_hinh=dict(ngan_sach=list(paper.budgets), loai_dau=list(paper.head_types), luoi_bai=list(paper.paper_grid), che_do=list(paper.predict_modes),
-                          seed=0, buoc_moi_dau={str(E): dict(pha1=E * spe1, pha2=E * spe2) for E in paper.budgets}),
-            do_lr={r.name: _curves(r) for r in arms},
-            chon={f'E{E}|{t}': dict(g13=pick(c['g13'], protocol.lr_grid), g9=pick(c['g9'], paper.paper_grid), trung=c['g9'] is c['g13'])
-                  for (E, t), c in paper_choice.items()},
-            duong_hoc=paper_diag, pha2={_paper_key(r): dict(hat=r.seed, loss=r.train_loss, buoc=r.step) for r in paper_p2},
-            ghi_chu='PLAN_86 11.3: nhanh SAT BAI CheXFound (hoc cung luot, CHI mo ta, khong vao luat 4.5); mang val_paper_<khoa> (eval) + '
-                    'test_paper_<khoa>_<che do>.')
+        result['sat_bai'] = _paper_result(paper, protocol, arms, paper_choice, paper_diag, paper_p2, spe1, spe2, _PAPER_NOTE_MAIN)
+    if extra: result.update(extra)
+    return result, arrays
+
+
+def run_paper_only(vindr, backbone, protocol=config.Protocol(), paper=config.PaperArms(), curve=config.CurveDiagnostic(), num_workers=None,
+                   run_tag='', extra=None, log=print, phase2_seed_offset=config.MainRun().phase2_seed_offset):
+    '''CHỈ NHÁNH SÁT BÀI cho MỘT backbone (PLAN_86 §14.2 — B theo cấu hình nhánh sát bài, KHÔNG giao thức chính): đúng phần sát bài của run_main —
+       (1) đầu loại paper.head_types x 13 lr x ngân sách paper.budgets (chỉ số seed 0, hạt head_seed), học trên train, chấm val mỗi epoch; chọn lr
+       lưới 13 / lưới 9 theo AUROC val lần chấm cuối; (2) dự đoán val cuối pha 1 (eval); (3) pha 2: đầu đã chọn học tiếp cùng ngân sách trên
+       train + val (hạt dropout + phase2_seed_offset như run_main); (4) dự đoán test ở mọi paper.predict_modes. Vòng học dài max ngân sách; dòng mẫu
+       theo (hạt, bước) và RNG đầu tách -> đầu sát bài TRÙNG đầu sát bài của run_main(paper=...) cùng backbone (bộ kiểm trên CPU).
+       -> (kết quả ghi JSON được — khoá 'sat_bai' cùng cấu trúc run_main, mảng {val_paper_*, test_paper_*_<chế độ>, y_*, idx_*}).'''
+    import vindr_protocol
+    assert paper is not None, 'run_paper_only can cau hinh nhanh sat bai (config.PaperArms) -> DUNG'
+    _paper_check(paper, protocol)
+    nw = runtime.default_num_workers() if num_workers is None else num_workers
+    dev, pin, bs = backbone.device, backbone.device == 'cuda', protocol.batch_size
+    runtime.allow_tf32_heads()
+    tr, va, te = vindr.indices('train'), vindr.indices('val'), vindr.indices('test')
+    assert len(tr) and len(va) and len(te) and not (set(tr.tolist()) & set(va.tolist()) or set(te.tolist()) & set(np.r_[tr, va].tolist())), (
+        'tach train / val / test rong hoac chong nhau -> DUNG')
+    assert set(np.unique(vindr.labels[np.r_[tr, va]]).tolist()) <= {0.0, 1.0}, 'nhan train / val khong nhi phan -> DUNG'
+    tf_train, tf_eval = data.build_transforms(backbone.spec)
+    ds_tr = data.VinDrImages(vindr.keys, vindr.image_dir, tf_train, seed=protocol.data_seed)
+    ds_ev = data.VinDrImages(vindr.keys, vindr.image_dir, tf_eval)
+    gate = features.check_features(backbone, Image.open(os.path.join(vindr.image_dir, f'{vindr.keys[int(tr[0])]}.jpg')).convert('RGB'), tf_eval)
+    trva = np.sort(np.r_[tr, va])
+    spe1, spe2 = config.steps_per_epoch(len(tr), bs), config.steps_per_epoch(len(trva), bs)
+    e_max = max(paper.budgets)
+    n1, n2 = e_max * spe1, e_max * spe2
+    n_cls, dim = len(vindr.label_names), backbone.dim
+    y_val, main_idx = vindr.labels[va], [vindr.label_names.index(c) for c in vindr.main_classes]
+    val_loader = lambda: data.eval_loader(ds_ev, va, bs, nw, pin)
+    ram0, t0, t_val = runtime.ram_gb(), time.time(), [0.0]
+    if dev == 'cuda': torch.cuda.reset_peak_memory_stats()
+
+    def on_epoch_val(epoch, done):
+        t = time.time()
+        training.evaluate(done, backbone, val_loader(), y_val, main_idx)
+        t_val[0] += time.time() - t
+        log(f'  [sat bai] epoch {epoch:>2}/{e_max}: {len(done)} dau | AUROC val tot nhat theo loai '
+            + ', '.join(f'{ty} {selection.max_finite([r.val_auroc[-1] for r in done if r.head_type == ty]):.4f}' for ty in paper.head_types
+                        if any(r.head_type == ty for r in done)) + f' | {(time.time() - t0) / 60:.1f} phut')
+
+    def on_epoch_phase2(epoch, done):
+        log(f'  [pha 2 sat bai] epoch {epoch:>2}/{e_max}: {len(done)} dau | loss train TB theo loai '
+            + ', '.join(f'{ty} {np.mean([r.train_loss[-1] for r in done if r.head_type == ty]):.3f}' for ty in paper.head_types
+                        if any(r.head_type == ty for r in done)) + f' | {(time.time() - t0) / 60:.1f} phut')
+
+    arms = _paper_arms(paper, protocol, spe1, dim, n_cls, dev)
+    assert len({r.seed for r in arms}) == len(arms), 'hat dau trung -> DUNG'
+    log(f'86b {backbone.name} — CHI NHANH SAT BAI (PLAN_86 14.2): {len(arms)} dau = {list(paper.head_types)} x {len(protocol.lr_grid)} lr x E1 = E2 '
+        f'{list(paper.budgets)}, chi so seed 0 | pha 1: {e_max} epoch x {spe1} buoc tren train {len(tr):,} anh | pha 2: {e_max} epoch x {spe2} buoc tren '
+        f'train + val {len(trva):,} anh | du doan test {len(te):,} anh o {list(paper.predict_modes)} | kho anh {vindr.store} = '
+        f'{data.STORE_LABELS[vindr.store]} | {nw} worker | RAM trong / tong {ram0[0]} / {ram0[1]} GB')
+    tim1, _ = train_parallel(arms, backbone, ds_tr, tr, vindr.labels, protocol, n1, spe1, on_epoch_val, num_workers=nw)
+    choice = _paper_choose(arms, paper, protocol, log)
+    paper_p1 = _unique_runs([r for c in choice.values() for r in c.values()])
+    diag = {_paper_key(r): selection.learning_curve_summary(r.val_auroc, r.train_loss, curve.drop_threshold, curve.gain_window) for r in paper_p1}
+    p_val = training.predict(paper_p1, backbone, val_loader())
+    paper_p2 = [training.continue_run(r, r.tags['budget'] * spe2, protocol, phase2_seed_offset, phase=2) for r in paper_p1]
+    tim2, _ = train_parallel(paper_p2, backbone, ds_tr, trva, vindr.labels, protocol, n2, spe2, on_epoch_phase2, num_workers=nw)
+    p_test = _paper_predict_test(paper_p2, backbone, ds_ev, te, bs, nw, pin, paper.predict_modes)
+    finite = bool(all(np.isfinite(p).all() for p in p_val + sum(p_test.values(), [])))
+    steps_ok = all(r.step == r.max_steps for r in arms + paper_p2)
+    toc_do = dict(pha1=_timing(tim1, t_val[0]), pha2=_timing(tim2, 0.0), phut_tong=(time.time() - t0) / 60,
+                  gpu_gb_dinh=(torch.cuda.max_memory_allocated() / 1e9 if dev == 'cuda' else None), thiet_bi=runtime.device_name(dev), so_worker=nw,
+                  ram_gb_trong_dau_cuoi=[ram0[0], runtime.ram_gb()[0]], ram_gb_tong=ram0[1])
+    log(f"\nxong: {'✓' if steps_ok else '⚠'} so buoc dung | {'✓' if finite else '⚠'} du doan val + test huu han | {len(paper_p2)} dau pha 2, du doan test "
+        f"{list(p_test)} (CHUA cham — o cham cua notebook) | tong {toc_do['phut_tong']:.1f} phut | GPU dinh "
+        + (f"{toc_do['gpu_gb_dinh']:.1f} GB" if toc_do['gpu_gb_dinh'] is not None else '-'))
+    arrays = {f'val_paper_{_paper_key(r)}': p.astype(np.float32) for r, p in zip(paper_p1, p_val)}
+    arrays.update({f'test_paper_{_paper_key(r)}_{mode}': p.astype(np.float32) for mode, ps in p_test.items() for r, p in zip(paper_p2, ps)})
+    arrays.update(y_val=vindr.labels[va].astype(np.float32), y_test=vindr.labels[te].astype(np.float32), idx_val=va.astype(np.int64),
+                  idx_test=te.astype(np.int64))
+    sp = backbone.spec
+    result = dict(
+        t=datetime.datetime.now().strftime('%Y%m%d_%H%M%S'), run=run_tag, commit_chexfound=config.CHEXFOUND_COMMIT,
+        goi_sha=getattr(vindr_protocol, 'GOI_SHA', None), goi_phien_ban=vindr_protocol.__version__, bb=backbone.name, nguon_bb=backbone.source,
+        kho_anh=vindr.store, kieu_anh=data.STORE_LABELS[vindr.store], kich=sp.image_size, mean=[float(v) for v in sp.mean],
+        std=[float(v) for v in sp.std], amp_backbone=str(backbone.amp), tf32_dau=True, luoi=list(protocol.lr_grid), lo=bs,
+        chia=protocol.loss_divisor, wd=protocol.weight_decay, hat_du_lieu=protocol.data_seed, hat_dau=protocol.head_seed, so_seed=0,
+        lech_hat_pha2=phase2_seed_offset, chi_sat_bai=True, epoch=dict(pha1=e_max, pha2=e_max), buoc_moi_epoch=dict(pha1=spe1, pha2=spe2),
+        n_train=len(tr), n_val=len(va), n_test=len(te), md5_khoa=data.md5_keys(vindr.keys), md5_khoa_test=data.md5_keys([vindr.keys[i] for i in te]),
+        nhan=list(vindr.label_names), lop_chinh=list(vindr.main_classes),
+        sat_bai=_paper_result(paper, protocol, arms, choice, diag, paper_p2, spe1, spe2,
+                              'PLAN_86 14.2: CHI nhanh SAT BAI (khong giao thuc chinh), CHI mo ta; mang val_paper_<khoa> (eval) + test_paper_<khoa>_<che do>.'),
+        kiem=dict(dac_trung_tang_cuoi=gate['lech'], dau_phan_ky=[r.name for r in arms if not np.isfinite(r.val_auroc).all()], so_buoc_dung=steps_ok,
+                  du_doan_huu_han=finite),
+        toc_do=toc_do, mang=sorted(arrays), nguon=vindr.sources,
+        ghi_chu='PLAN_86 14.2: chi nhanh sat bai; du doan test MOT lan sau pha 2, CHUA cham (o cham cua notebook).')
     if extra: result.update(extra)
     return result, arrays

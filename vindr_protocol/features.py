@@ -25,9 +25,36 @@ def dinov2_original(model, x, amp, device, n_blocks=4, with_last=False):
     return (blocks, blocks[-1][0], ref) if with_last else (blocks, blocks[-1][0])
 
 
+@torch.no_grad()
+def b_luong(model, parts, x, amp, device, n_blocks=4, with_last=False):
+    '''B (78z skip7; PLAN_86 §14.2): h8 = parts['lo'](x, amp) (= shared_lo của nền: block 0–7 ảnh toàn cảnh + skip block 7 từ 5 ô, kiểu autocast
+       đổi được) -> block luong.tang[0] .. cuối, sau MỖI block: parts['out'] (= _out_luong) rồi luong.buoc(l, h, st, mo_ghi=True) (luồng vùng / ghi
+       ngược, neo = parts['neo'](B)) — = vòng lặp upper_luong_hr của nền -> 4 block cuối qua layernorm cuối. -> (blocks, patch tầng cuối)
+       [, tầng cuối đủ token [B, 1 + N, d] theo đường THAM CHIẾU parts['ref'](x) của nền (cổng check_features)].'''
+    luong, B = parts['luong'], int(x.shape[0])
+    with torch.autocast(device, dtype=amp, enabled=(device == 'cuda')):
+        h = parts['lo'](x, amp)
+        luong.dat_neo(parts['neo'](B))
+        st = luong.bat_dau(B)
+        L, outs = model.encoder.layer, []
+        for l in range(int(luong.tang[0]), len(L)):
+            h = parts['out'](L[l](h))
+            h = luong.buoc(l, h, st, True)
+            outs.append(h)
+        assert len(outs) >= n_blocks, f'luong vung bat dau o block {luong.tang[0]}: chi {len(outs)} block sau no < {n_blocks} -> DUNG'
+        normed = [model.layernorm(o) for o in outs[-n_blocks:]]
+        ref = None
+        if with_last:
+            luong.dat_neo(parts['neo'](B))
+            ref = parts['ref'](x)
+    blocks = tuple((h[:, 1:], h[:, 0]) for h in normed)
+    return (blocks, normed[-1][:, 1:], ref) if with_last else (blocks, normed[-1][:, 1:])
+
+
 def _last_layer_reference(backbone, ref):
-    '''(patch, cls) tầng cuối qua layernorm theo đường forward CHUẨN của mô hình (để so với get_intermediate_layers / hidden_states).'''
-    if backbone.kind == 'hf_dinov2':
+    '''(patch, cls) tầng cuối qua layernorm theo đường forward CHUẨN của mô hình (để so với get_intermediate_layers / hidden_states). B: ref = tầng cuối
+       đủ token theo đường tham chiếu của nền (= đường trích token của 85f).'''
+    if backbone.kind in ('hf_dinov2', 'b_luong'):
         return ref[:, 1:], ref[:, 0]
     return ref['x_norm_patchtokens'], ref['x_norm_clstoken']
 

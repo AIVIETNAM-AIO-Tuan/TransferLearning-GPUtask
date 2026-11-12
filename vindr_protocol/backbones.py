@@ -31,7 +31,8 @@ def rename_dinov2_keys(state_dict, model_keys):
 
 @dataclass
 class Backbone:
-    '''kind: 'hf_dinov2' (Dinov2Model của transformers — RAD-DINO) | 'dinov2_original' (DinoVisionTransformer mã gốc — CheXFound).'''
+    '''kind: 'hf_dinov2' (Dinov2Model của transformers — RAD-DINO) | 'dinov2_original' (DinoVisionTransformer mã gốc — CheXFound) | 'b_luong' (B:
+       Dinov2Model của nền notebook B + luồng vùng; parts = hàm / đối tượng của nền — b_from_base).'''
     name: str
     model: torch.nn.Module
     spec: BackboneSpec
@@ -39,18 +40,33 @@ class Backbone:
     amp: torch.dtype
     source: dict = field(default_factory=dict)
     kind: str = 'hf_dinov2'
+    parts: dict = None
 
     @property
     def dim(self):
-        return int(self.model.config.hidden_size) if self.kind == 'hf_dinov2' else int(self.model.embed_dim)
+        return int(self.model.config.hidden_size) if self.kind in ('hf_dinov2', 'b_luong') else int(self.model.embed_dim)
 
     @property
     def patch_size(self):
-        return int(self.model.config.patch_size) if self.kind == 'hf_dinov2' else int(self.model.patch_size)
+        return int(self.model.config.patch_size) if self.kind in ('hf_dinov2', 'b_luong') else int(self.model.patch_size)
 
     def features(self, x, with_last=False):
+        if self.kind == 'b_luong':
+            return features.b_luong(self.model, self.parts, x, self.amp, self.device, with_last=with_last)
         fn = features.dinov2_hf if self.kind == 'hf_dinov2' else features.dinov2_original
         return fn(self.model, x, self.amp, self.device, with_last=with_last)
+
+
+def b_from_base(model, luong, lo, out, neo_value, ref, device, amp, mean, std, image_size=518, source=None):
+    '''B (PLAN_86 §14.2) từ ĐỐI TƯỢNG của nền notebook mốc B (Phần 3 skip7 tới C6S, như 85f) — gói KHÔNG chép mã B: model = backbone (Dinov2Model
+       đông cứng), luong = LUONG (luồng vùng), lo(img, amp) = shared_lo với kiểu autocast đổi được, out = _out_luong, neo_value = neo của ảnh frontal
+       (VinDr: mọi ảnh frontal), ref(x) = tầng cuối đủ token theo đường trích token của 85f (cổng). Chuẩn hoá như RAD-DINO, ảnh 518. -> Backbone.'''
+    assert float(neo_value) in (0.0, 1.0), f'neo {neo_value} khong phai 0 / 1 -> DUNG'
+    assert not model.training and not luong.training, 'backbone / luong vung cua B dang o che do train (dropout) -> goi .eval() truoc -> DUNG'
+    neo = lambda n: torch.full((int(n),), float(neo_value), device=device)
+    spec = BackboneSpec('B', int(image_size), (float(mean),) * 3, (float(std),) * 3)
+    return Backbone('B', model, spec, device, amp, dict(source or {}, neo=float(neo_value)), kind='b_luong',
+                    parts=dict(luong=luong, lo=lo, out=out, neo=neo, ref=ref))
 
 
 def load_raddino(device, amp):
