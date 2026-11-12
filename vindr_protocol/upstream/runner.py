@@ -196,9 +196,11 @@ def _get_micromamba(mm_dir, log=print):
 
 
 def _probe_env(python, require_cuda=True):
-    '''Trong Python của môi trường: phiên bản, CUDA, GPU, cuDNN; có GPU + xFormers -> chạy memory_efficient_attention trên GPU so với attention tường
-       minh (fp32). -> dict.'''
-    code = ('import json, importlib, sys, warnings\n'
+    '''Trong Python của môi trường: phiên bản, CUDA, GPU, cuDNN; require_cuda + có GPU + xFormers -> chạy memory_efficient_attention trên GPU so với
+       attention tường minh (fp32). require_cuda=False (bản kiểm trên máy; 86h — thử môi trường trên GPU chưa được hỗ trợ chính thức, PLAN_86 §15): KHÔNG
+       chạy kernel nào ở đây (chỉ hỏi phiên bản / thiết bị) — phép tính GPU thử riêng ở gpu_probe, lỗi không làm hỏng bước dựng. -> dict.'''
+    code = (f'RUN_GPU = {bool(require_cuda)}\n'
+            'import json, importlib, sys, warnings\n'
             'warnings.simplefilter("ignore")\n'
             'v = {}\n'
             'for m in ("torch", "torchvision", "xformers", "torchmetrics", "numpy", "pandas", "PIL", "scipy", "sklearn", "skimage", "skmultilearn", '
@@ -210,7 +212,7 @@ def _probe_env(python, require_cuda=True):
             '            gpu=(torch.cuda.get_device_name(0) if torch.cuda.is_available() else None),\n'
             '            bo_nho_gb=(torch.cuda.get_device_properties(0).total_memory / 2 ** 30 if torch.cuda.is_available() else None),\n'
             '            cudnn=(torch.backends.cudnn.version() if torch.cuda.is_available() else None))\n'
-            'if torch.cuda.is_available() and v["xformers"]:\n'
+            'if RUN_GPU and torch.cuda.is_available() and v["xformers"]:\n'
             '    from xformers.ops import memory_efficient_attention\n'
             '    g = torch.Generator(device="cuda").manual_seed(0)\n'
             '    q, k, w = (torch.randn(2, 257, 16, 64, device="cuda", generator=g).half() for _ in range(3))\n'
@@ -573,15 +575,16 @@ def run_head(kind, repo, package_dir, csv_root, checkpoint, config, out_root, lo
 SMOKE_SIZES = dict(train=512, val=256, test=256)     # lượt chạy thử: n ảnh đầu mỗi tách
 
 
-def smoke_test(repo, package_dir, csv_root, checkpoint, config, out_root, log=print):
-    '''Chạy thử nhỏ bằng mã của họ (~5 phút): Linear 2 lr trên bộ CSV nhỏ (SMOKE_SIZES ảnh đầu mỗi tách), 1 + 1 epoch -> bắt lỗi môi trường / tệp
-       chạy / đọc kết quả / ghi lần chấm / hai cổng check_run TRƯỚC lượt đầy đủ. Số đo ở đây vô nghĩa (không đọc). Không dùng --num-samples (lỗi
-       của họ với torch mới, xem vindr_dataset.write_subset_csvs).'''
+def smoke_test(repo, package_dir, csv_root, checkpoint, config, out_root, log=print, kind='lin'):
+    '''Chạy thử nhỏ bằng mã của họ (~5 phút): một loại đầu (mặc định Linear; 86h thêm GLoRI — PLAN_86 §15) 2 lr trên bộ CSV nhỏ (SMOKE_SIZES ảnh đầu mỗi
+       tách), 1 + 1 epoch -> bắt lỗi môi trường / tệp chạy / đọc kết quả / ghi lần chấm / hai cổng check_run TRƯỚC lượt đầy đủ. Số đo ở đây vô nghĩa
+       (không đọc). Không dùng --num-samples (lỗi của họ với torch mới, xem vindr_dataset.write_subset_csvs).'''
     from .vindr_dataset import write_subset_csvs
     small = os.path.join(out_root, 'csv_nho')
     if not os.path.isabs(csv_root): small = os.path.relpath(small)      # giữ kiểu đường dẫn của csv_root (bản kiểm Windows: tương đối)
     sizes = write_subset_csvs(csv_root, small, SMOKE_SIZES)
-    r = train_once('lin', repo, package_dir, small, checkpoint, config, os.path.join(out_root, 'thu_hoc'), lrs=(1e-4, 1e-3),
+    run_dir = os.path.join(out_root, 'thu_hoc' if kind == 'lin' else f'thu_hoc_{kind}')
+    r = train_once(kind, repo, package_dir, small, checkpoint, config, run_dir, lrs=(1e-4, 1e-3),
                    extra=('--epochs', 1, '--val-epochs', 1, '--eval-period-epochs', 1, '--save-checkpoint-frequency', 1), log=log)
     assert r['chay']['ma_thoat'] == 0, f"chay thu (hoc) THAT BAI:\n{r['chay']['duoi_log']}"
     c = check_run(r, small)
