@@ -13,14 +13,10 @@ SHENZHEN_SPLITS = {
 }
 SHENZHEN_N_IMAGES = 662          # 326 bình thường (_0) + 336 lao (_1)
 
-# ---------------- Shenzhen: tệp tar ảnh trên Drive (PLAN_88 §14.17; shenzhen_images.build_tar trên máy Claude) ----------------
-# 662 PNG của data/shenzhen/images/images (bản đã kiểm palette 10–12/11), USTAR không nén, thứ tự tên, mtime 0. Tuấn tải lên cxrlt_2024/shenzhen/.
-# Dựng 12/11/2026 trên máy (hai lần, cùng md5): data/shenzhen/shenzhen_png_662.tar.
-SHENZHEN_DRIVE = ('shenzhen',)
-SHENZHEN_TAR = 'shenzhen_png_662.tar'
-SHENZHEN_TAR_MD5 = '0df955f23ab558020e0a7df1af64e869'
-SHENZHEN_TAR_SIZE = 3769190400
-SHENZHEN_PNG_TABLE_MD5 = '0a00e9bc49071f992f9164fc4bc80321'     # md5 bảng "tên \t md5 \t kích thước" của 662 PNG (shenzhen_images.png_manifest)
+# ---------------- Shenzhen: ảnh trên Drive (PLAN_88 §14.20) ----------------
+# Ảnh đọc THẲNG từ MyDrive/MIMIC_CXR/Shenzhen (Tuấn đặt; đường dẫn ở ô notebook) sau khi integrity.check_shenzhen khớp mốc từng tệp (shenzhen_manifest).
+# md5 bảng "tên \t md5 \t kích thước \n" của 662 PNG của bản đã kiểm palette trên máy (data/shenzhen/images/images, 12/11/2026) — = shenzhen_manifest.PNG.
+SHENZHEN_PNG_TABLE_MD5 = '0a00e9bc49071f992f9164fc4bc80321'
 
 # ---------------- Shenzhen: công thức theo source CheXFound @ 7e288d0 (PLAN_88 §4.3, §14.14–§14.15) ----------------
 # scripts/eval/run_eval_shenzhen.sh (+ _glori.sh): lô 64 / GPU x 4 GPU, --val-epochs 100 --epochs 100 --image-size 512 --save-checkpoint-frequency 20

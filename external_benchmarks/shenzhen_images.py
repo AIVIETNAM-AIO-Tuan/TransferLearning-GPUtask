@@ -1,19 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Ảnh Shenzhen trên Drive (PLAN_88 §4.7, §14.17): 662 PNG gốc — đúng các tệp đã kiểm palette 10–12/11 trên máy — gói thành MỘT tệp tar không nén,
-thứ tự tên + siêu dữ liệu cố định (dựng lại từ cùng tệp -> cùng byte, cùng md5 ghim ở config). Tuấn tải tệp tar lên `cxrlt_2024/shenzhen/`; notebook
-tải qua khối đọc Drive chuẩn (md5 máy chủ = ghim, `tai` kiểm md5 bản tải về), giải nén AN TOÀN: chỉ tệp thường, tên đúng `<thư mục>/<tên>` của 662 tên
-trong tệp chia, không trùng / thiếu / thừa. Đo cho `88a`: giải mã PNG trong tiến trình chính (loader val / test của họ num_workers=0) và đọc bộ đệm
-mảng uint8 (chỉ đo — có dùng bộ đệm cho `88c` hay không do Tuấn chọn sau `88a`)."""
+"""Ảnh Shenzhen cho notebook (PLAN_88 §4.7, §14.20): 662 PNG gốc đọc THẲNG từ Drive MyDrive/MIMIC_CXR/Shenzhen (Tuấn đặt; không tar, không giải nén —
+Tuấn 12/11). Trước khi tải: integrity.check_shenzhen — md5 + kích thước từng tệp qua Drive API = mốc của bản đã kiểm trên máy (shenzhen_manifest).
+Tải từng tệp qua khối đọc Drive chuẩn (`tai` kiểm md5 bản tải về = md5 máy chủ, mà md5 máy chủ đã = mốc), đặt TÊN GỐC trong một thư mục (liên kết tới
+bản tải về — tên bản tải về mang ID Drive; không tạo được liên kết -> chép). Đo cho 88a: giải mã PNG / bộ đệm uint8 (time_decode)."""
 import hashlib
 import os
-import re
-import tarfile
+import shutil
 import time
 
-from . import config, datasets
-
-TAR_DIR = 'shenzhen_png'                   # thư mục trong tar: shenzhen_png/<tên>.png
-_NAME = re.compile(r'CHNCXR_\d{4}_[01]\.png')
+from . import datasets
 
 
 def _md5_file(path, chunk=8 << 20):
@@ -25,71 +20,38 @@ def _md5_file(path, chunk=8 << 20):
 
 
 def png_manifest(image_dir, names):
-    '''[(tên, md5, kích thước)] theo thứ tự tên + md5 của bảng đó (dấu vân tay 662 tệp PNG, độc lập với cách gói).'''
+    '''[(tên, md5, kích thước)] theo thứ tự tên + md5 của bảng "tên\\tmd5\\tkích thước\\n" (= cách tính config.SHENZHEN_PNG_TABLE_MD5).'''
     rows = [(n, _md5_file(os.path.join(image_dir, n)), os.path.getsize(os.path.join(image_dir, n))) for n in sorted(names)]
     text = ''.join(f'{n}\t{m}\t{s}\n' for n, m, s in rows)
     return rows, hashlib.md5(text.encode()).hexdigest()
 
 
-def build_tar(image_dir, names, out_path):
-    '''MÁY CLAUDE: gói các PNG `names` của image_dir thành tar (USTAR, không nén) theo thứ tự tên; mtime 0, mode 0644, uid / gid 0, không tên người dùng
-       -> cùng tệp nguồn thì cùng byte. Cổng: đọc lại tar -> từng thành viên trùng tệp nguồn (md5). -> dict(md5, kich_thuoc, so_anh, md5_bang_png).'''
-    names = sorted(names)
-    assert all(_NAME.fullmatch(n) for n in names), 'ten anh la (khong phai CHNCXR_dddd_[01].png) -> DUNG'
-    rows, man_md5 = png_manifest(image_dir, names)
-    tmp = out_path + '.dang_ghi'
-    with tarfile.open(tmp, 'w', format=tarfile.USTAR_FORMAT) as tf:
-        for n, _, size in rows:
-            ti = tarfile.TarInfo(f'{TAR_DIR}/{n}')
-            ti.size, ti.mtime, ti.mode, ti.uid, ti.gid, ti.uname, ti.gname = size, 0, 0o644, 0, 0, '', ''
-            with open(os.path.join(image_dir, n), 'rb') as f:
-                tf.addfile(ti, f)
-    want = {f'{TAR_DIR}/{n}': m for n, m, _ in rows}
-    with tarfile.open(tmp, 'r:') as tf:
-        got = {m.name: hashlib.md5(tf.extractfile(m).read()).hexdigest() for m in tf.getmembers() if m.isfile()}
-    assert got == want, 'tar doc lai KHAC tep nguon -> DUNG'
-    os.replace(tmp, out_path)
-    return dict(md5=_md5_file(out_path), kich_thuoc=os.path.getsize(out_path), so_anh=len(rows), md5_bang_png=man_md5)
-
-
-def extract_tar(tar_path, dest_dir, names):
-    '''Giải nén AN TOÀN vào dest_dir/TAR_DIR: mọi thành viên phải là tệp thường tên `TAR_DIR/<tên>` với <tên> thuộc `names` (tệp chia), không trùng;
-       đủ đúng tập `names` (không thiếu / thừa); ghi bằng nội dung đọc từ tar (không dùng extract -> không có liên kết / đường dẫn lạ). -> thư mục ảnh.'''
-    want = set(names)
-    out_dir = os.path.join(dest_dir, TAR_DIR)
-    os.makedirs(out_dir, exist_ok=True)
-    seen = set()
-    with tarfile.open(tar_path, 'r:') as tf:
-        for m in tf:
-            parts = m.name.split('/')
-            assert m.isfile() and len(parts) == 2 and parts[0] == TAR_DIR and parts[1] in want and parts[1] not in seen, (
-                f'thanh vien tar la: {m.name!r} (kieu {m.type!r}) -> DUNG')
-            seen.add(parts[1])
-            with tf.extractfile(m) as src, open(os.path.join(out_dir, parts[1]), 'wb') as dst:
-                dst.write(src.read())
-    assert seen == want, f'tar thieu {len(want - seen)} anh cua tep chia -> DUNG'
-    extra = sorted(set(os.listdir(out_dir)) - want)
-    assert not extra, f'thu muc anh co tep ngoai tep chia: {extra[:5]} -> DUNG'
-    return out_dir
-
-
-def fetch_shenzhen_images(kiem_ke, tai, xung_dot, dest_dir, names, log=print):
-    '''COLAB: tệp tar ở cxrlt_2024/<config.SHENZHEN_DRIVE> qua khối đọc Drive chuẩn. Cổng: có tệp; md5 máy chủ của bản dùng = ghim (TRƯỚC khi tải);
-       `tai` kiểm md5 bản tải về = md5 máy chủ; giải nén an toàn đúng 662 tên của tệp chia. -> dict(thu_muc_anh, md5, kich_thuoc, giay_tai, giay_giai_nen).'''
-    kk = kiem_ke(config.SHENZHEN_DRIVE, mau=re.escape(config.SHENZHEN_TAR))[1]
-    versions = kk.get(config.SHENZHEN_TAR)
-    assert versions, (f"thieu {config.SHENZHEN_TAR} trong cxrlt_2024/{'/'.join(config.SHENZHEN_DRIVE)} -> Tuan tai tep tar len Drive "
-                      '(PLAN_88 §14.17) -> DUNG')
-    if xung_dot(versions):
-        log(f'  ! {config.SHENZHEN_TAR}: {len(versions)} ban NOI DUNG KHAC -> chi dung ban co md5 = ghim')
-    good = [v for v in versions if v['md5'] == config.SHENZHEN_TAR_MD5]
-    assert good, f"{config.SHENZHEN_TAR}: md5 tren Drive {[v['md5'] for v in versions]} != ghim {config.SHENZHEN_TAR_MD5} -> DUNG"
-    t0 = time.time()
-    path = tai(good[0])
-    t1 = time.time()
-    assert os.path.getsize(path) == config.SHENZHEN_TAR_SIZE, f'{path}: kich thuoc {os.path.getsize(path)} != {config.SHENZHEN_TAR_SIZE} -> DUNG'
-    image_dir = extract_tar(path, dest_dir, names)
-    return dict(thu_muc_anh=image_dir, md5=good[0]['md5'], kich_thuoc=os.path.getsize(path), giay_tai=t1 - t0, giay_giai_nen=time.time() - t1)
+def fetch_drive_pngs(chosen, tai, dest_dir, log=print):
+    '''COLAB: chosen = integrity.check_shenzhen(...)['png']['chon'] (đã kiểm: đủ 662 tên, md5 + kích thước máy chủ = mốc) -> tải từng tệp bằng `tai`
+       (khối đọc Drive chuẩn: md5 bản tải về = md5 máy chủ) -> dest_dir/<tên gốc>. Cổng: tập tên = mốc; kích thước bản tải về = mốc; thư mục đích không có
+       tệp ngoài mốc. -> dict(thu_muc_anh, so_anh, kich_thuoc, giay_tai, lien_ket).'''
+    from . import shenzhen_manifest as man
+    assert set(chosen) == set(man.PNG), f'tap anh chon {len(chosen)} != moc {len(man.PNG)} -> DUNG (chay integrity.check_shenzhen truoc)'
+    assert all(chosen[n]['md5'] == man.PNG[n][0] for n in chosen), 'md5 may chu cua anh chon khac moc -> DUNG'
+    os.makedirs(dest_dir, exist_ok=True)
+    t0, total, links = time.time(), 0, 0
+    for i, n in enumerate(sorted(chosen)):
+        src = os.path.abspath(tai(chosen[n]))
+        assert os.path.getsize(src) == man.PNG[n][1], f'{n}: kich thuoc ban tai ve {os.path.getsize(src)} != moc {man.PNG[n][1]} -> DUNG'
+        dst = os.path.join(dest_dir, n)
+        if os.path.lexists(dst):
+            os.remove(dst)
+        try:
+            os.symlink(src, dst)
+            links += 1
+        except OSError:
+            shutil.copyfile(src, dst)
+        total += man.PNG[n][1]
+        if (i + 1) % 100 == 0:
+            log(f'  {i + 1} / {len(chosen)} anh ({time.time() - t0:.0f} s)')
+    extra = sorted(set(os.listdir(dest_dir)) - set(man.PNG))
+    assert not extra, f'thu muc anh co tep ngoai moc: {extra[:5]} -> DUNG'
+    return dict(thu_muc_anh=dest_dir, so_anh=len(chosen), kich_thuoc=total, giay_tai=time.time() - t0, lien_ket=links)
 
 
 def time_decode(image_dir, names, n=48, seed=0, cache_dir=None):
