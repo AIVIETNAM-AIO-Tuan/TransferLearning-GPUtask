@@ -35,7 +35,12 @@ GLORI_HALVES = (PAPER_LRS[:5], PAPER_LRS[5:])                   # khi 9 đầu G
 # micromamba (conda-forge). Gói mã họ import nhưng họ không ghim: bản cùng thời (12/2023), chỉ cần import được (không vào phép tính Linear / GLoRI).
 THEIR_PYTHON = '3.9'
 THEIR_CORE = {'torch': '2.0.0', 'torchvision': '0.15.0', 'xformers': '0.0.18', 'torchmetrics': '0.10.3'}
-THEIR_PIP = (*(f'{k}=={v}' for k, v in THEIR_CORE.items()), 'numpy==1.26.4', 'setuptools<70', 'fvcore==0.1.5.post20221221', 'iopath==0.1.10',
+# torch / torchvision theo nền tảng. Linux (Colab): bản CUDA 11.7 từ KHO CỦA PYTORCH — torchvision 0.15.0 bản Linux trên PyPI khai phụ thuộc
+# `torch==2.0.0+cu117` mà PyPI không có (PyPI cấm phiên bản có nhãn cục bộ) -> pip chỉ PyPI KHÔNG giải được (Colab 12/11: ResolutionImpossible; tái hiện
+# trên máy bằng --dry-run --platform manylinux). = nguồn của conda-extras.yaml (kênh pytorch, pytorch-cuda 11.7). Windows: chỉ bản kiểm CPU trên máy.
+THEIR_TORCH = {'linux-64': (('torch==2.0.0+cu117', 'torchvision==0.15.0+cu117'), 'https://download.pytorch.org/whl/cu117'),
+               'win-64': (('torch==2.0.0', 'torchvision==0.15.0'), None)}
+THEIR_PIP = ('xformers==0.0.18', 'torchmetrics==0.10.3', 'numpy==1.26.4', 'setuptools<70', 'fvcore==0.1.5.post20221221', 'iopath==0.1.10',
              'omegaconf==2.3.0', 'pandas==2.1.4', 'pillow==10.2.0', 'scipy==1.11.4', 'scikit-learn==1.3.2', 'scikit-image==0.22.0',
              'scikit-multilearn==0.2.0', 'toolz==0.12.1', 'transformers==4.36.2', 'accelerate==0.25.0', 'peft==0.7.1', 'open_clip_torch==2.23.0',
              'timm==0.9.12')
@@ -227,10 +232,28 @@ def _probe_env(python, require_cuda=True):
     return info
 
 
+def _pip_env():
+    '''Môi trường cho pip của môi trường riêng: BỎ mọi biến PIP_* / UV_* / PYTHON* của notebook (Colab có thể đặt chỉ mục / ràng buộc riêng), không
+       đọc tệp cấu hình pip nào (PIP_CONFIG_FILE = os.devnull), tắt site người dùng. -> (env, [tên biến đã bỏ]).'''
+    dropped = sorted(k for k in os.environ if k.startswith(('PIP_', 'UV_', 'PYTHON')))
+    env = {k: v for k, v in os.environ.items() if k not in dropped}
+    env.update(PYTHONNOUSERSITE='1', PIP_CONFIG_FILE=os.devnull)
+    return env, dropped
+
+
+def their_pip_command(python, skip=()):
+    '''Lệnh pip cài môi trường của họ (nền tảng hiện tại): torch / torchvision theo THEIR_TORCH (+ kho của PyTorch trên Linux), rồi THEIR_PIP (bỏ skip).'''
+    torch_pins, index = THEIR_TORCH[_platform()]
+    pkgs = [p for p in (*torch_pins, *THEIR_PIP) if p.split('==')[0].split('<')[0] not in skip]
+    cmd = [python, '-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '--progress-bar', 'off']
+    if index: cmd += ['--extra-index-url', index]
+    return cmd + pkgs, pkgs
+
+
 def build_their_env(dest=THEIR_ENV_DIR, skip=(), require_cuda=True, log=print):
-    '''Môi trường THƯ VIỆN CỦA HỌ (PLAN_86 §13.2): micromamba tạo Python 3.9 (conda-forge) tại dest, pip cài THEIR_PIP (bỏ các gói trong skip — chỉ
-       bản kiểm trên máy CPU: skip=('xformers',), require_cuda=False). Cổng: Python 3.9, đúng phiên bản THEIR_CORE (trừ skip), CUDA 11.7 dùng được, xFormers
-       chạy đúng trên GPU. -> dict(python, thong_tin, phut). Gọi lại khi đã dựng: chỉ kiểm.'''
+    '''Môi trường THƯ VIỆN CỦA HỌ (PLAN_86 §13.2): micromamba tạo Python 3.9 (conda-forge) tại dest, pip cài torch / torchvision (THEIR_TORCH) + THEIR_PIP
+       (bỏ các gói trong skip — chỉ bản kiểm trên máy CPU: skip=('xformers',), require_cuda=False). Cổng: Python 3.9, đúng phiên bản THEIR_CORE (trừ skip),
+       CUDA 11.7 dùng được, A100, xFormers chạy đúng trên GPU. -> dict(python, thong_tin, phut). Gọi lại khi đã dựng: chỉ cài phần thiếu + kiểm.'''
     t0 = time.time()
     py = _env_python(dest)
     if not os.path.exists(py):
@@ -240,18 +263,19 @@ def build_their_env(dest=THEIR_ENV_DIR, skip=(), require_cuda=True, log=print):
                            capture_output=True, text=True, env=dict(os.environ, MAMBA_ROOT_PREFIX=mm_dir))
         assert r.returncode == 0 and os.path.exists(py), f'micromamba tao Python {THEIR_PYTHON} THAT BAI:\n{(r.stderr or r.stdout)[-3000:]}'
         log(f'  Python {THEIR_PYTHON} (conda-forge) tai {dest}: {(time.time() - t0) / 60:.1f} phut')
-    pkgs = [p for p in THEIR_PIP if p.split('==')[0].split('<')[0] not in skip]
-    env = dict(os.environ, PYTHONNOUSERSITE='1')
-    env.pop('PYTHONPATH', None)
-    r = subprocess.run([py, '-m', 'pip', 'install', '--quiet', '--no-input', '--disable-pip-version-check', *pkgs], capture_output=True, text=True, env=env)
-    assert r.returncode == 0, f'pip cai thu vien cua ho THAT BAI:\n{(r.stderr or r.stdout)[-3000:]}'
+    cmd, pkgs = their_pip_command(py, skip=skip)
+    env, dropped = _pip_env()
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert r.returncode == 0, (f'pip cai thu vien cua ho THAT BAI (bien bo khoi pip: {dropped}):\n'
+                               f'{(r.stdout + chr(10) + r.stderr)[-4000:]}')
+    log(f'  pip: {len(pkgs)} goi cai xong ({(time.time() - t0) / 60:.1f} phut tu dau)')
     info = _probe_env(py, require_cuda=require_cuda)
     v = info['phien_ban']
     assert info['python'].startswith(THEIR_PYTHON + '.'), f"Python {info['python']} != {THEIR_PYTHON} -> DUNG"
     bad = {k: v.get(k) for k, want in THEIR_CORE.items() if k not in skip and (v.get(k) or '').split('+')[0] != want}
     assert not bad, f'phien ban KHAC conda-extras.yaml cua ho: {bad} (can {THEIR_CORE}) -> DUNG'
     assert (v.get('numpy') or '').startswith('1.'), f"numpy {v.get('numpy')} (torch 2.0 can numpy 1.x) -> DUNG"
-    return dict(python=py, thong_tin=info, goi=pkgs, phut=(time.time() - t0) / 60)
+    return dict(python=py, thong_tin=info, goi=pkgs, bien_bo_khoi_pip=dropped, phut=(time.time() - t0) / 60)
 
 
 def fetch_chexfound_files(kiem_ke, tai, xung_dot, dest_dir=WEIGHTS_DIR, log=print):
