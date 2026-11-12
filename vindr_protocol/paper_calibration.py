@@ -28,18 +28,18 @@ def build_rows(result, arrays):
         rows.append(dict(khoa=f'chinh_E{E}_ens_{t}', dau=t, probs=np.mean([arrays[k].astype(np.float64) for k in ks], 0),
                          dieu_kien=f'luot chinh E1=E2={E}, TB {len(ks)} seed (ensemble), dau doc eval(), encoder {amp}'))
         rows.append(dict(khoa=f'chinh_E{E}_s0_{t}', dau=t, probs=arrays[ks[0]].astype(np.float64),
-                         dieu_kien=f'luot chinh E1=E2={E}, seed 0 (mot dau nhu bai), dau doc eval(), encoder {amp}'))
+                         dieu_kien=f'luot chinh E1=E2={E}, chi so seed 0 (mot dau nhu bai; hat head_seed), dau doc eval(), encoder {amp}'))
     sb = result.get('sat_bai')
     for Eb in (sb['cau_hinh']['ngan_sach'] if sb else []):
         for t in sb['cau_hinh']['loai_dau']:
             c = sb['chon'][f'E{Eb}|{t}']
             for mode in sb['cau_hinh']['che_do']:
                 rows.append(dict(khoa=f'sat_E{Eb}_g13_{mode}_{t}', dau=t, probs=arrays[f"test_paper_{c['g13']['khoa']}_{mode}"].astype(np.float64),
-                                 dieu_kien=f"sat bai E1=E2={Eb}, seed 0, luoi 13 lr (lr {c['g13']['lr']:g}), {MODE_TEXT[mode]}"))
+                                 dieu_kien=f"sat bai E1=E2={Eb}, chi so seed 0, luoi 13 lr (lr {c['g13']['lr']:g}), {MODE_TEXT[mode]}"))
             if not c['trung'] and CRITERION['mode'] in sb['cau_hinh']['che_do']:
                 m = CRITERION['mode']
                 rows.append(dict(khoa=f'sat_E{Eb}_g9_{m}_{t}', dau=t, probs=arrays[f"test_paper_{c['g9']['khoa']}_{m}"].astype(np.float64),
-                                 dieu_kien=f"sat bai E1=E2={Eb}, seed 0, luoi 9 lr cua bai (lr {c['g9']['lr']:g}), {MODE_TEXT[m]}"))
+                                 dieu_kien=f"sat bai E1=E2={Eb}, chi so seed 0, luoi 9 lr cua bai (lr {c['g9']['lr']:g}), {MODE_TEXT[m]}"))
     return rows
 
 

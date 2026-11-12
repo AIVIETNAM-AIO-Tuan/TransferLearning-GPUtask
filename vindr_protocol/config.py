@@ -63,7 +63,8 @@ PAPER_LR_GRID = LR_GRID[:9]                             # bài CheXFound §IV-A2
 @dataclass(frozen=True)
 class PaperArms:
     '''Nhánh SÁT BÀI CheXFound (PLAN_86 §11.3) — học song song trong lượt chính (thêm đầu; RNG đầu tách -> đầu của lượt chính không đổi), CHỈ
-       mô tả, không vào luật §4.5. Mỗi ngân sách E: E1 = E2 = E; seed 0 (mã gốc: seed = 0, một lượt); chọn lr theo AUROC val như mã (lưới 13) và
+       mô tả, không vào luật §4.5. Mỗi ngân sách E: E1 = E2 = E; CHỈ SỐ seed 0 — hạt thật = head_seed(E, loại, lr), đổi theo E, KHÔNG phải hạt 0
+       của mã gốc (đính chính 12/11; mã gốc: torch.manual_seed(0) rồi khởi tạo tuần tự); chọn lr theo AUROC val như mã (lưới 13) và
        báo thêm lựa chọn trong lưới 9 của bài (khác nhau -> học pha 2 cả hai); dự đoán test ở mọi chế độ predict_modes:
        'eval' = đầu đọc eval() + autocast của lượt (sửa của 86) | 'train' = dropout BẬT như evaluate() của mã gốc (F7) |
        'train_fp16' = dropout bật + encoder autocast fp16 như mã gốc (F13) — gần cách chấm của họ nhất (đầu vẫn học trên đặc trưng của lượt).'''

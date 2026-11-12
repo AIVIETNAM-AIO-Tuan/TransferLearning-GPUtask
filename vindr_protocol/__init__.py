@@ -14,7 +14,9 @@ Mỗi tệp một trách nhiệm:
     selection          chọn lr, luật khoá epoch, chẩn đoán đường học
     pipeline           vòng học song song, chạy thử pha 1, các phép kiểm, lượt chính (+ nhánh sát bài)
     paper_calibration  ô hiệu chỉnh với Bảng IV bài CheXFound theo quy ước báo của bài (CHỈ mô tả)
+    upstream           86e (PLAN_86 §12): chạy NGUYÊN VĂN linear_glori.py của repo CheXFound (clone commit ghim, không chép / sửa tệp của họ):
+                       lớp dữ liệu VinDr theo khuôn CheXpert của họ, tệp chạy dưới torchrun, điều phối lượt chạy, chấm + đặt cạnh Bảng IV / 86b
 
 Notebook chỉ gọi hàm; khối Drive chuẩn (khoi_doc_drive / khoi_ghi_drive / khoi_ghi_cuoi) vẫn ở ô C0 của notebook và được truyền vào
 dưới dạng hàm (kiem_ke, tai, xung_dot, ghi, ghi_json) — gói không chứa ID Drive."""
-__version__ = '0.2.0'
+__version__ = '0.3.0'
