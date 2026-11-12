@@ -7,6 +7,7 @@ theo ảnh (họ không công bố mã bootstrap: rút ảnh có hoàn lại, h�
 (hàm của gói). Đặt cạnh Bảng IV và nhánh sát bài E = 10 của 86b (cùng dữ liệu, cùng lần rút -> hiệu ghép cặp mã họ − mã ta). Cổng chéo: số của hàng 86b
 tính bằng torchmetrics ở đây phải trùng số ô C5 của 86b (tính bằng hàm của gói)."""
 import json
+import re
 import warnings
 
 import numpy as np
@@ -16,6 +17,8 @@ from ..paper_calibration import PAPER_TABLE_IV
 
 N_BOOT, BOOT_SEED = 1000, 8603
 RESULT_86B = ('stage4_nb86b', 'r86b_chexfound')
+RESULT_86E = ('stage4_nb86e', 'r86e_chexfound_ma_goc')      # mã họ, thư viện mới, G4 — hàng so sánh của 86f (PLAN_86 §13.2)
+_FILE_86E = re.compile(r'(luot|du_doan)_86e_(lin|glori)_(\d{8}_\d{6})\.(json|npz)')
 HEADS = ('lin', 'glori')
 HEAD_TEXT = {'lin': 'Linear', 'glori': 'GLoRI'}
 
@@ -77,14 +80,45 @@ def load_86b_rows(kiem_ke, tai, xung_dot, vindr, budget=10, mode='train_fp16', l
     return rows, dict(json=js[-1], npz=npz, hieu_chinh=hc, ngan_sach=budget, che_do=mode)
 
 
-def run(results, vindr, kiem_ke, tai, xung_dot, n_boot=N_BOOT, seed=BOOT_SEED, log=print):
-    '''results = {'lin': run_head(...), 'glori': run_head(...)} của runner. Chấm, in bảng, trả dict ghi JSON được.'''
+def load_86e_rows(kiem_ke, tai, xung_dot, vindr, log=print):
+    '''Dự đoán test của 86e (mã họ, thư viện mới, G4) từ Drive: lượt MỚI NHẤT có đủ JSON + npz của cả hai loại đầu. Chưa có -> (None, None).
+       Cổng: nhãn test trong npz = nhãn test của dữ liệu này (cùng thứ tự).'''
+    kk = kiem_ke(RESULT_86E, mau=_FILE_86E.pattern)[1]
+    have = {}
+    for name in kk:
+        m = _FILE_86E.fullmatch(name)
+        if m: have.setdefault(m.group(3), set()).add((m.group(1), m.group(2)))
+    need = {(k, h) for k in ('luot', 'du_doan') for h in HEADS}
+    full = sorted(t for t, s in have.items() if s >= need)
+    if not full:
+        log(f"  86e: chua co ket qua du hai loai dau trong {'/'.join(RESULT_86E)} -> KHONG co hang 86e (so sau o bang CPU)")
+        return None, None
+    t = full[-1]
+    te = vindr.indices('test')
+    rows = {}
+    for h in HEADS:
+        js, npz = f'luot_86e_{h}_{t}.json', f'du_doan_86e_{h}_{t}.npz'
+        for n in (js, npz):
+            if xung_dot(kk[n]): log(f'  ! {n}: nhieu ban NOI DUNG KHAC -> dung ban MOI NHAT')
+        with open(tai(kk[js][0]), encoding='utf-8') as f: meta = json.load(f)
+        with np.load(tai(kk[npz][0])) as z:
+            probs, tgt = z['preds'].astype(np.float64), z['target'].astype(np.int64)
+        assert np.array_equal(tgt, vindr.labels[te].astype(np.int64)), '86e: thu tu / nhan test KHAC du lieu nay -> DUNG'
+        rows[h] = dict(probs=probs, lr=meta['chon']['lr'])
+    return rows, dict(t=t, luot_khac=[x for x in full if x != t])
+
+
+def run(results, vindr, kiem_ke, tai, xung_dot, n_boot=N_BOOT, seed=BOOT_SEED, compare_86e=False, label='86e', log=print):
+    '''results = {'lin': run_head(...), 'glori': run_head(...)} của runner. Chấm, in bảng, trả dict ghi JSON được. compare_86e (86f): thêm hàng 86e (G4,
+       thư viện mới) từ Drive + hiệu ghép cặp {label} − 86e; 86e chưa chạy -> ghi chú, không lỗi.'''
     te = vindr.indices('test')
     target = vindr.labels[te].astype(np.int64)
     main_idx = [vindr.label_names.index(c) for c in vindr.main_classes]
     boot_idx = bootstrap_indices(len(te), n_boot, seed)
     ours_86b, src_86b = load_86b_rows(kiem_ke, tai, xung_dot, vindr, log=log)
-    out = dict(n_boot=n_boot, hat=seed, bang_iv=PAPER_TABLE_IV, nguon_86b=src_86b, hang={}, hieu={}, ket_luan={}, cong={})
+    rows_86e, src_86e = load_86e_rows(kiem_ke, tai, xung_dot, vindr, log=log) if compare_86e else (None, None)
+    out = dict(n_boot=n_boot, hat=seed, nhan=label, bang_iv=PAPER_TABLE_IV, nguon_86b=src_86b, nguon_86e=src_86e, so_86e=bool(compare_86e), hang={},
+               hieu={}, hieu_86e={}, ket_luan={}, cong={})
     for t in HEADS:
         r = results[t]
         with np.load(r['du_doan']) as z:
@@ -104,6 +138,12 @@ def run(results, vindr, kiem_ke, tai, xung_dot, n_boot=N_BOOT, seed=BOOT_SEED, l
                               ma_ta_86b=dict(**row_86b, lr=ours_86b[t]['lr']))
         out['hieu'][t] = dict(ap28=row_up['ap28'] - row_86b['ap28'], ap28_ci=ci(d[:, 0]), auroc28=row_up['auroc28'] - row_86b['auroc28'],
                               auroc28_ci=ci(d[:, 1]))
+        if rows_86e is not None:
+            row_e, boot_e = score_row(rows_86e[t]['probs'], target, main_idx, boot_idx)
+            out['hang'][t]['g4_86e'] = dict(**row_e, lr=rows_86e[t]['lr'])
+            de = boot_up - boot_e
+            out['hieu_86e'][t] = dict(ap28=row_up['ap28'] - row_e['ap28'], ap28_ci=ci(de[:, 0]), auroc28=row_up['auroc28'] - row_e['auroc28'],
+                                      auroc28_ci=ci(de[:, 1]))
         p = PAPER_TABLE_IV[t]
         out['ket_luan'][t] = dict(ap_bai_trong_ci=bool(row_up['ap28_ci'][0] <= p['ap'] <= row_up['ap28_ci'][1]),
                                   auroc_bai_trong_ci=bool(row_up['auroc28_ci'][0] <= p['auroc'] <= row_up['auroc28_ci'][1]))
@@ -115,8 +155,11 @@ def run(results, vindr, kiem_ke, tai, xung_dot, n_boot=N_BOOT, seed=BOOT_SEED, l
 def _print(out, log):
     fm = lambda v: f'{v:.3f}'
     fci = lambda c: f'[{c[0]:.3f}; {c[1]:.3f}]'
-    log('=== C8 · MA GOC CheXFound (86e) vs Bang IV vs ma ta (86b nhanh sat bai E = 10, che do dropout bat + fp16) — test 3.000 anh, 28 cot torchmetrics '
+    log(f"=== C8 · MA GOC CheXFound ({out['nhan']}) vs Bang IV vs ma ta (86b nhanh sat bai E = 10, che do dropout bat + fp16)"
+        + (' vs 86e (ma goc, thu vien moi, G4)' if out['so_86e'] else '') + ' — test 3.000 anh, 28 cot torchmetrics '
         f"0.10.3; TB + CI95 = {out['n_boot']} lan rut anh (hat {out['hat']}); CHI MO TA ===")
+    if out['so_86e'] and out['nguon_86e'] is None:
+        log('86e (G4) chua co ket qua tren Drive -> chua so duoc moi truong thu vien (so sau o bang CPU)')
     for t in HEADS:
         h, p, c = out['hang'][t], PAPER_TABLE_IV[t], out['cong'][t]
         cv = c['cong_val']
@@ -127,13 +170,20 @@ def _print(out, log):
             f"o C5 86b (ham cua goi): lech max {c['lech_86b_c5']:.1e} -> {'TRUNG' if c['trung_86b_c5'] else '⚠ LECH'}")
         log(f"{'hang (dieu kien)':<78}{'AP28':>7}{'AP28 TB [CI95]':>24}{'AUROC28':>9}{'AUROC28 TB [CI95]':>24}{'AP27':>7}{'AUROC27':>9}{'AUPRC27':>9}{'mAP21':>7}")
         log(f"{'BAI Bang IV':<78}{'':>7}{fm(p['ap']) + ' ' + fci(p['ap_ci']):>24}{'':>9}{fm(p['auroc']) + ' ' + fci(p['auroc_ci']):>24}")
-        for key, text in (('ma_goc', f"MA GOC linear_glori.py, lr {h['ma_goc']['lr']:g} (val AUROC {h['ma_goc']['auroc_val']:.4f}, dropout bat)"
-                                     + (', 2 nua luoi' if h['ma_goc']['hai_nua'] else '')),
-                          ('ma_ta_86b', f"MA TA 86b nhanh sat bai E=10, lr {h['ma_ta_86b']['lr']:g}")):
+        rows_txt = [('ma_goc', f"MA GOC linear_glori.py ({out['nhan']}), lr {h['ma_goc']['lr']:g} (val AUROC {h['ma_goc']['auroc_val']:.4f}, dropout bat)"
+                                + (', 2 nua luoi' if h['ma_goc']['hai_nua'] else ''))]
+        if 'g4_86e' in h:
+            rows_txt.append(('g4_86e', f"MA GOC 86e (thu vien moi, G4), lr {h['g4_86e']['lr']:g}"))
+        rows_txt.append(('ma_ta_86b', f"MA TA 86b nhanh sat bai E=10, lr {h['ma_ta_86b']['lr']:g}"))
+        for key, text in rows_txt:
             x = h[key]
             log(f"{text[:77]:<78}{fm(x['ap28']):>7}{fm(x['ap28_tb']) + ' ' + fci(x['ap28_ci']):>24}{fm(x['auroc28']):>9}"
                 f"{fm(x['auroc28_tb']) + ' ' + fci(x['auroc28_ci']):>24}{fm(x['ap27']):>7}{fm(x['auroc27']):>9}{fm(x['auprc27']):>9}{fm(x['ap21']):>7}")
         d, k = out['hieu'][t], out['ket_luan'][t]
         log(f"hieu ma goc - ma ta (ghep cap, cung lan rut): AP28 {d['ap28']:+.3f} {fci(d['ap28_ci'])} | AUROC28 {d['auroc28']:+.3f} {fci(d['auroc28_ci'])}")
+        if t in out['hieu_86e']:
+            e = out['hieu_86e'][t]
+            log(f"hieu {out['nhan']} - 86e (ghep cap; = anh huong GOP moi truong thu vien + GPU, cung ma, cung du lieu): AP28 {e['ap28']:+.3f} "
+                f"{fci(e['ap28_ci'])} | AUROC28 {e['auroc28']:+.3f} {fci(e['auroc28_ci'])}")
         log(f"tieu chi (dat truoc, PLAN_86 12.5): AP bai trong CI ma goc {'CO' if k['ap_bai_trong_ci'] else 'KHONG'} | AUROC bai trong CI "
             f"{'CO' if k['auroc_bai_trong_ci'] else 'KHONG'} -> {'TAI TAO DUOC' if k['tai_tao_duoc'] else 'CHUA tai tao'}")

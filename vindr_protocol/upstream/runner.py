@@ -28,8 +28,19 @@ LINEAR_GLORI_MD5 = '123bf478c4cdaf548084e618facb4f5f'          # md5 (LF) bản 
 LAUNCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'launch.py')
 OPTS = ('student.block_chunks=4',)                               # G7: config.yaml ghi 0, checkpoint 4 khúc -> không chỉnh thì 24 tầng không nạp
 BATCH, IMAGE_SIZE = 256, 512                                     # 1 GPU x 256 = lô hiệu dụng 4 x 64 của README; ảnh 512 như script / README của họ
-PAPER_GLORI_LRS = (1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3)   # §IV-A.2 của bài (GLoRI)
-GLORI_HALVES = (PAPER_GLORI_LRS[:5], PAPER_GLORI_LRS[5:])        # khi 9 lr cùng lúc tràn bộ nhớ (PLAN_86 §12.3)
+PAPER_LRS = (1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3)   # §IV-A.2 của bài — Linear VÀ GLoRI (Tuấn 12/11, PLAN_86 §13.1)
+GLORI_HALVES = (PAPER_LRS[:5], PAPER_LRS[5:])                   # khi 9 đầu GLoRI cùng lúc tràn bộ nhớ (PLAN_86 §12.3)
+# ---- môi trường THƯ VIỆN CỦA HỌ cho 86f (PLAN_86 §13.2): conda-extras.yaml = Python 3.9, pytorch 2.0.0 + pytorch-cuda 11.7, torchvision 0.15.0,
+# xformers 0.0.18, torchmetrics 0.10.3, fvcore, iopath, omegaconf. Cài bằng pip (bản PyPI cùng phiên bản, dựng với CUDA 11.7) trong Python 3.9 của
+# micromamba (conda-forge). Gói mã họ import nhưng họ không ghim: bản cùng thời (12/2023), chỉ cần import được (không vào phép tính Linear / GLoRI).
+THEIR_PYTHON = '3.9'
+THEIR_CORE = {'torch': '2.0.0', 'torchvision': '0.15.0', 'xformers': '0.0.18', 'torchmetrics': '0.10.3'}
+THEIR_PIP = (*(f'{k}=={v}' for k, v in THEIR_CORE.items()), 'numpy==1.26.4', 'setuptools<70', 'fvcore==0.1.5.post20221221', 'iopath==0.1.10',
+             'omegaconf==2.3.0', 'pandas==2.1.4', 'pillow==10.2.0', 'scipy==1.11.4', 'scikit-learn==1.3.2', 'scikit-image==0.22.0',
+             'scikit-multilearn==0.2.0', 'toolz==0.12.1', 'transformers==4.36.2', 'accelerate==0.25.0', 'peft==0.7.1', 'open_clip_torch==2.23.0',
+             'timm==0.9.12')
+THEIR_ENV_DIR = '/content/moi_truong_ho'
+MICROMAMBA_URL = 'https://micro.mamba.pm/api/micromamba/{platform}/latest'
 RESULTS_FILE = 'results_eval_linear.json'
 _OOM = ('CUDA out of memory', 'OutOfMemoryError', 'CUBLAS_STATUS_ALLOC_FAILED')
 
@@ -93,30 +104,154 @@ def install_packages(packages=PIP_PACKAGES, guard=GUARD_PACKAGES, disk='/content
                 dia_trong_gb=free)
 
 
+CHILD_PYTHON = None       # None -> Python của notebook (86e); 86f: Python của môi trường riêng (use_python)
+CHILD_ISOLATED = False    # True -> tiến trình con KHÔNG thừa hưởng PYTHONPATH / site người dùng của Python notebook
+
+
+def use_python(path, isolated=True):
+    '''Mọi tiến trình con (torchrun, kiểm import) chạy bằng `path` (86f: Python 3.9 của môi trường họ); isolated -> PYTHONPATH chỉ repo + gói.'''
+    global CHILD_PYTHON, CHILD_ISOLATED
+    CHILD_PYTHON, CHILD_ISOLATED = path, bool(isolated)
+
+
+def _child_python():
+    return CHILD_PYTHON or sys.executable
+
+
 def child_env(repo, package_dir):
-    '''Môi trường cho tiến trình con: PYTHONPATH = repo CheXFound + thư mục gói; bộ cấp phát CUDA expandable_segments (bớt phân mảnh, không đổi số).'''
+    '''Môi trường cho tiến trình con: PYTHONPATH = repo CheXFound + thư mục gói (+ PYTHONPATH cũ nếu KHÔNG cô lập). Môi trường mới (không cô lập):
+       bộ cấp phát CUDA expandable_segments (bớt phân mảnh, không đổi số). Môi trường riêng của họ: KHÔNG đặt — torch 2.0 chưa có tuỳ chọn này
+       (có từ 2.1) và báo lỗi ngay lần cấp phát CUDA đầu; site người dùng tắt.'''
     env = dict(os.environ)
-    env['PYTHONPATH'] = os.pathsep.join([repo, package_dir] + ([env['PYTHONPATH']] if env.get('PYTHONPATH') else []))
-    env.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
+    inherit = [] if CHILD_ISOLATED else ([env['PYTHONPATH']] if env.get('PYTHONPATH') else [])
+    env['PYTHONPATH'] = os.pathsep.join([repo, package_dir] + inherit)
+    if CHILD_ISOLATED:
+        env['PYTHONNOUSERSITE'] = '1'
+        env.pop('PYTHONHOME', None)
+        if 'expandable_segments' in env.get('PYTORCH_CUDA_ALLOC_CONF', ''): env.pop('PYTORCH_CUDA_ALLOC_CONF')
+    else:
+        env.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
     return env
 
 
-def check_imports(repo, package_dir):
-    '''Import linear_glori.py của họ trong một tiến trình MỚI (như torchrun sẽ làm) + phiên bản thư viện. Lỗi -> AssertionError kèm stderr.'''
-    code = ('import json, importlib, warnings\n'
+def check_imports(repo, package_dir, expect_xformers=None):
+    '''Import linear_glori.py của họ trong một tiến trình MỚI bằng Python của tiến trình con (như torchrun sẽ làm) + phiên bản thư viện + cờ
+       XFORMERS_AVAILABLE ở ba lớp attention / block / swiglu_ffn của họ. expect_xformers True / False -> cổng (86f: nhánh xFormers thật).'''
+    code = ('import json, importlib, sys, warnings\n'
             'warnings.simplefilter("ignore")\n'
             'from chexfound.eval.classification import linear_glori\n'
             'import vindr_protocol.upstream.launch\n'
-            'v = {}\n'
+            'from chexfound.layers import attention, block, swiglu_ffn\n'
+            'v = {"python": sys.version.split()[0]}\n'
             'for m in ("torch", "torchvision", "torchmetrics", "fvcore", "omegaconf", "peft", "open_clip", "skmultilearn", "transformers", "xformers"):\n'
             '    try: v[m] = getattr(importlib.import_module(m), "__version__", "co")\n'
             '    except Exception: v[m] = None\n'
+            'v["xformers_cua_ho"] = {n: bool(getattr(x, "XFORMERS_AVAILABLE", False)) for n, x in (("attention", attention), ("block", block), '
+            '("swiglu_ffn", swiglu_ffn))}\n'
             'print("PHIEN_BAN=" + json.dumps(v))\n')
-    r = subprocess.run([sys.executable, '-c', code], env=child_env(repo, package_dir), capture_output=True, text=True)
-    assert r.returncode == 0 and 'PHIEN_BAN=' in r.stdout, f'import ma CheXFound THAT BAI:\n{r.stderr[-3000:]}'
+    r = subprocess.run([_child_python(), '-c', code], env=child_env(repo, package_dir), capture_output=True, text=True)
+    assert r.returncode == 0 and 'PHIEN_BAN=' in r.stdout, f'import ma CheXFound THAT BAI:\n{scrub(r.stderr[-3000:])}'
     versions = json.loads(r.stdout.split('PHIEN_BAN=')[-1].strip().splitlines()[0])
     assert versions['torchmetrics'] == '0.10.3', f"torchmetrics {versions['torchmetrics']} != 0.10.3 (ban ho ghim) -> DUNG"
+    if expect_xformers is not None:
+        flags = versions['xformers_cua_ho']
+        assert all(f == expect_xformers for f in flags.values()), f'XFORMERS_AVAILABLE trong ma cua ho {flags} != {expect_xformers} -> DUNG'
     return versions
+
+
+def _platform():
+    return 'win-64' if os.name == 'nt' else 'linux-64'
+
+
+def _env_python(dest):
+    return os.path.join(dest, 'python.exe') if os.name == 'nt' else os.path.join(dest, 'bin', 'python')
+
+
+def _get_micromamba(mm_dir, log=print):
+    '''micromamba (một tệp chạy, tải từ micro.mamba.pm) -> đường dẫn. Chỉ lấy đúng tệp chạy trong gói tải về.'''
+    import io
+    import urllib.request
+    member = 'Library/bin/micromamba.exe' if os.name == 'nt' else 'bin/micromamba'
+    mm = os.path.join(mm_dir, *member.split('/'))
+    if os.path.exists(mm):
+        return mm
+    os.makedirs(mm_dir, exist_ok=True)
+    data = urllib.request.urlopen(MICROMAMBA_URL.format(platform=_platform()), timeout=600).read()
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:bz2') as tf:
+        m = tf.getmember(member)
+        assert m.isfile() and not os.path.isabs(m.name) and '..' not in m.name.split('/'), f'goi micromamba la ({m.name}) -> DUNG'
+        try:
+            tf.extract(m, mm_dir, filter='data')
+        except TypeError:                                   # Python < 3.10.12 / 3.11.4: extract chưa có filter
+            tf.extract(m, mm_dir)
+    os.chmod(mm, 0o755)
+    log(f'  micromamba: {len(data) / 2 ** 20:.0f} MB tai ve')
+    return mm
+
+
+def _probe_env(python, require_cuda=True):
+    '''Trong Python của môi trường: phiên bản, CUDA, GPU, cuDNN; có GPU + xFormers -> chạy memory_efficient_attention trên GPU so với attention tường
+       minh (fp32). -> dict.'''
+    code = ('import json, importlib, sys, warnings\n'
+            'warnings.simplefilter("ignore")\n'
+            'v = {}\n'
+            'for m in ("torch", "torchvision", "xformers", "torchmetrics", "numpy", "pandas", "PIL", "scipy", "sklearn", "skimage", "skmultilearn", '
+            '"fvcore", "iopath", "omegaconf", "peft", "transformers", "open_clip", "timm", "toolz"):\n'
+            '    try: v[m] = getattr(importlib.import_module(m), "__version__", "co")\n'
+            '    except Exception: v[m] = None\n'
+            'import torch\n'
+            'info = dict(phien_ban=v, python=sys.version.split()[0], cuda=torch.version.cuda, cuda_dung_duoc=torch.cuda.is_available(),\n'
+            '            gpu=(torch.cuda.get_device_name(0) if torch.cuda.is_available() else None),\n'
+            '            bo_nho_gb=(torch.cuda.get_device_properties(0).total_memory / 2 ** 30 if torch.cuda.is_available() else None),\n'
+            '            cudnn=(torch.backends.cudnn.version() if torch.cuda.is_available() else None))\n'
+            'if torch.cuda.is_available() and v["xformers"]:\n'
+            '    from xformers.ops import memory_efficient_attention\n'
+            '    g = torch.Generator(device="cuda").manual_seed(0)\n'
+            '    q, k, w = (torch.randn(2, 257, 16, 64, device="cuda", generator=g).half() for _ in range(3))\n'
+            '    o = memory_efficient_attention(q, k, w).float()\n'
+            '    a = torch.softmax(q.float().transpose(1, 2) @ k.float().transpose(1, 2).transpose(-1, -2) / 8.0, -1) @ w.float().transpose(1, 2)\n'
+            '    info["xformers_lech"] = float((o - a.transpose(1, 2)).abs().max())\n'
+            'print("MT=" + json.dumps(info))\n')
+    env = dict(os.environ, PYTHONNOUSERSITE='1')
+    env.pop('PYTHONPATH', None)
+    if 'expandable_segments' in env.get('PYTORCH_CUDA_ALLOC_CONF', ''): env.pop('PYTORCH_CUDA_ALLOC_CONF')
+    r = subprocess.run([python, '-c', code], env=env, capture_output=True, text=True)
+    assert r.returncode == 0 and 'MT=' in r.stdout, f'kiem moi truong THAT BAI:\n{r.stderr[-3000:]}'
+    info = json.loads(r.stdout.split('MT=')[-1].strip().splitlines()[0])
+    if require_cuda:
+        assert info['cuda_dung_duoc'], f"moi truong cua ho: torch {info['phien_ban']['torch']} KHONG dung duoc GPU {info['gpu']} -> DUNG (GPU phai A100)"
+        assert info['cuda'] == '11.7', f"CUDA cua torch = {info['cuda']} != 11.7 -> DUNG"
+        assert 'A100' in (info['gpu'] or '') and info['bo_nho_gb'] >= 70, (
+            f"GPU {info['gpu']} ({info['bo_nho_gb']:.0f} GB): 86f can A100 80 GB (Runtime > Change runtime type) -> DUNG")
+        assert info.get('xformers_lech') is not None and info['xformers_lech'] < 2e-2, f"xFormers tren GPU lech {info.get('xformers_lech')} -> DUNG"
+    return info
+
+
+def build_their_env(dest=THEIR_ENV_DIR, skip=(), require_cuda=True, log=print):
+    '''Môi trường THƯ VIỆN CỦA HỌ (PLAN_86 §13.2): micromamba tạo Python 3.9 (conda-forge) tại dest, pip cài THEIR_PIP (bỏ các gói trong skip — chỉ
+       bản kiểm trên máy CPU: skip=('xformers',), require_cuda=False). Cổng: Python 3.9, đúng phiên bản THEIR_CORE (trừ skip), CUDA 11.7 dùng được, xFormers
+       chạy đúng trên GPU. -> dict(python, thong_tin, phut). Gọi lại khi đã dựng: chỉ kiểm.'''
+    t0 = time.time()
+    py = _env_python(dest)
+    if not os.path.exists(py):
+        mm_dir = dest + '_micromamba'
+        mm = _get_micromamba(mm_dir, log=log)
+        r = subprocess.run([mm, 'create', '-y', '-q', '-p', dest, '-c', 'conda-forge', '--override-channels', f'python={THEIR_PYTHON}', 'pip'],
+                           capture_output=True, text=True, env=dict(os.environ, MAMBA_ROOT_PREFIX=mm_dir))
+        assert r.returncode == 0 and os.path.exists(py), f'micromamba tao Python {THEIR_PYTHON} THAT BAI:\n{(r.stderr or r.stdout)[-3000:]}'
+        log(f'  Python {THEIR_PYTHON} (conda-forge) tai {dest}: {(time.time() - t0) / 60:.1f} phut')
+    pkgs = [p for p in THEIR_PIP if p.split('==')[0].split('<')[0] not in skip]
+    env = dict(os.environ, PYTHONNOUSERSITE='1')
+    env.pop('PYTHONPATH', None)
+    r = subprocess.run([py, '-m', 'pip', 'install', '--quiet', '--no-input', '--disable-pip-version-check', *pkgs], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, f'pip cai thu vien cua ho THAT BAI:\n{(r.stderr or r.stdout)[-3000:]}'
+    info = _probe_env(py, require_cuda=require_cuda)
+    v = info['phien_ban']
+    assert info['python'].startswith(THEIR_PYTHON + '.'), f"Python {info['python']} != {THEIR_PYTHON} -> DUNG"
+    bad = {k: v.get(k) for k, want in THEIR_CORE.items() if k not in skip and (v.get(k) or '').split('+')[0] != want}
+    assert not bad, f'phien ban KHAC conda-extras.yaml cua ho: {bad} (can {THEIR_CORE}) -> DUNG'
+    assert (v.get('numpy') or '').startswith('1.'), f"numpy {v.get('numpy')} (torch 2.0 can numpy 1.x) -> DUNG"
+    return dict(python=py, thong_tin=info, goi=pkgs, phut=(time.time() - t0) / 60)
 
 
 def fetch_chexfound_files(kiem_ke, tai, xung_dot, dest_dir=WEIGHTS_DIR, log=print):
@@ -143,36 +278,41 @@ def fetch_chexfound_files(kiem_ke, tai, xung_dot, dest_dir=WEIGHTS_DIR, log=prin
     return paths['teacher_checkpoint.pth'], paths['config.yaml']
 
 
-def check_weight_loading(repo, config_path, checkpoint_path, opts=OPTS):
+_CHECK_LOAD_CODE = '''import json, sys, warnings
+warnings.simplefilter("ignore")
+import torch
+from omegaconf import OmegaConf
+from chexfound.configs import dinov2_default_config
+from chexfound.models import build_model_from_cfg
+from chexfound.layers import attention, swiglu_ffn
+cfg_path, ck_path, opts = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
+sd = torch.load(ck_path, map_location="cpu")
+sd = sd["teacher"] if "teacher" in sd else sd
+sd = {k.replace("module.", ""): v for k, v in sd.items()}
+sd = {k.replace("backbone.", ""): v for k, v in sd.items()}
+out = dict(xformers=dict(attention=bool(attention.XFORMERS_AVAILABLE), swiglu_ffn=bool(swiglu_ffn.XFORMERS_AVAILABLE)))
+for name, extra in (("config_phat_hanh", []), ("voi_opts", opts)):
+    cfg = OmegaConf.merge(OmegaConf.create(dinov2_default_config), OmegaConf.load(cfg_path), OmegaConf.from_cli(extra))
+    model, _ = build_model_from_cfg(cfg, only_teacher=True)
+    msg = model.load_state_dict(sd, strict=False)
+    out[name] = dict(block_chunks=int(cfg.student.block_chunks), so_khoa_mo_hinh=len(model.state_dict()), thieu=len(msg.missing_keys),
+                     thieu_tang=sum(k.startswith("blocks.") for k in msg.missing_keys),
+                     thua_ngoai_dau=sorted({k.split(".")[0] for k in msg.unexpected_keys} - {"dino_head", "ibot_head"}),
+                     lop_mlp=type(model.blocks[0][-1].mlp if cfg.student.block_chunks else model.blocks[0].mlp).__name__)
+    del model
+print("NAP=" + json.dumps(out))
+'''
+
+
+def check_weight_loading(repo, config_path, checkpoint_path, opts=OPTS, package_dir=None):
     '''Dựng encoder bằng HÀM CỦA HỌ (build_model_from_cfg trên config gộp như get_cfg_from_args: mặc định + config.yaml + --opts) và nạp như
        load_pretrained_weights của họ (khoá 'teacher', bỏ 'module.' / 'backbone.', strict=False) — hai lần: config phát hành nguyên trạng và có opts.
-       -> {ten: dict(block_chunks, thieu, thieu_tang, thua_ngoai_dau)}. Không chạy GPU.'''
-    import warnings
-
-    import torch
-    if repo not in sys.path: sys.path.insert(0, repo)
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore')
-        from omegaconf import OmegaConf
-
-        from chexfound.configs import dinov2_default_config
-        from chexfound.models import build_model_from_cfg
-    sd = torch.load(checkpoint_path, map_location='cpu')
-    sd = sd['teacher'] if 'teacher' in sd else sd
-    sd = {k.replace('module.', ''): v for k, v in sd.items()}
-    sd = {k.replace('backbone.', ''): v for k, v in sd.items()}
-    out = {}
-    for name, extra in (('config_phat_hanh', []), ('voi_opts', list(opts))):
-        cfg = OmegaConf.merge(OmegaConf.create(dinov2_default_config), OmegaConf.load(config_path), OmegaConf.from_cli(extra))
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            model, _ = build_model_from_cfg(cfg, only_teacher=True)
-        msg = model.load_state_dict(sd, strict=False)
-        out[name] = dict(block_chunks=int(cfg.student.block_chunks), so_khoa_mo_hinh=len(model.state_dict()), thieu=len(msg.missing_keys),
-                         thieu_tang=sum(k.startswith('blocks.') for k in msg.missing_keys),
-                         thua_ngoai_dau=sorted({k.split('.')[0] for k in msg.unexpected_keys} - {'dino_head', 'ibot_head'}))
-        del model
-    return out
+       Chạy trong TIẾN TRÌNH CON bằng Python của tiến trình con (= nơi mã họ chạy): 86f kiểm đúng các lớp xFormers (MemEffAttention, SwiGLUFFNFused)
+       mà torchrun sẽ dựng. -> {ten: dict(block_chunks, thieu, thieu_tang, thua_ngoai_dau, lop_mlp), xformers: {...}}. Không chạy GPU.'''
+    r = subprocess.run([_child_python(), '-c', _CHECK_LOAD_CODE, config_path, checkpoint_path, json.dumps(list(opts))],
+                       env=child_env(repo, package_dir or repo), capture_output=True, text=True)
+    assert r.returncode == 0 and 'NAP=' in r.stdout, f'kiem nap trong so (tien trinh con) THAT BAI:\n{scrub(r.stderr[-3000:])}'
+    return json.loads(r.stdout.split('NAP=')[-1].strip().splitlines()[0])
 
 
 def run_torchrun(repo, package_dir, args, log_path, poll_s=180, log=print):
@@ -180,9 +320,9 @@ def run_torchrun(repo, package_dir, args, log_path, poll_s=180, log=print):
        -> dict(ma_thoat, phut, tran_bo_nho, duoi_log).'''
     env = child_env(repo, package_dir)
     if USE_TORCHRUN:
-        cmd = [sys.executable, '-m', 'torch.distributed.run', '--nproc_per_node=1', '--standalone', LAUNCH, *[str(a) for a in args]]
+        cmd = [_child_python(), '-m', 'torch.distributed.run', '--nproc_per_node=1', '--standalone', LAUNCH, *[str(a) for a in args]]
     else:                    # bản kiểm trên máy (Windows: torchrun --standalone cần libuv): một tiến trình, biến môi trường phân tán đặt tay
-        cmd = [sys.executable, LAUNCH, *[str(a) for a in args]]
+        cmd = [_child_python(), LAUNCH, *[str(a) for a in args]]
         env.update(RANK='0', WORLD_SIZE='1', LOCAL_RANK='0', LOCAL_WORLD_SIZE='1', MASTER_ADDR='127.0.0.1', MASTER_PORT=str(29500 + os.getpid() % 500),
                    USE_LIBUV='0')
     t0 = time.time()
@@ -369,12 +509,12 @@ def _write_test_predictions(run_dir, preds_target):
 
 
 def run_head(kind, repo, package_dir, csv_root, checkpoint, config, out_root, log=print):
-    '''Đầy đủ một loại đầu bằng mã của họ. Linear: lưới mặc định 13 lr, một lượt. GLoRI: lưới 9 lr của bài, một lượt; TRÀN BỘ NHỚ -> hai nửa lưới
+    '''Đầy đủ một loại đầu bằng mã của họ, lưới 9 lr của bài (PAPER_LRS, Linear và GLoRI; Tuấn 12/11), một lượt; GLoRI TRÀN BỘ NHỚ -> hai nửa lưới
        (5 + 4), lr thắng = AUROC val pha 1 cao nhất giữa hai nửa (hoà -> nửa đầu = lr nhỏ hơn, như so sánh '>' của họ). Dự đoán test = lần chấm test
        CUỐI của pha 2 trong lượt thắng (không chạy --infer riêng); cổng check_run trên MỌI lượt (hai nửa: cả hai).'''
     t0 = time.time()
-    lrs = None if kind == 'lin' else PAPER_GLORI_LRS
-    log(f"== {kind}: hoc bang ma cua ho ({'luoi mac dinh 13 lr' if lrs is None else 'luoi 9 lr cua bai'}, lo {BATCH}, anh {IMAGE_SIZE}, 10 + 10 epoch)")
+    lrs = PAPER_LRS
+    log(f"== {kind}: hoc bang ma cua ho (luoi {len(lrs)} lr cua bai, lo {BATCH}, anh {IMAGE_SIZE}, 10 + 10 epoch)")
     runs = [train_once(kind, repo, package_dir, csv_root, checkpoint, config, os.path.join(out_root, f'{kind}_hoc'), lrs, log=log)]
     if runs[0]['chay']['ma_thoat'] != 0 and kind == 'glori' and runs[0]['chay']['tran_bo_nho']:
         log('  ! GLoRI 9 lr cung luc TRAN BO NHO -> chay hai nua luoi (PLAN_86 12.3)')
@@ -419,20 +559,27 @@ def smoke_test(repo, package_dir, csv_root, checkpoint, config, out_root, log=pr
 
 
 # ---- lưu / khôi phục từng loại đầu qua tệp resume của khối ghi cuối (ghi() chỉ local; dong_bo() tải lên MỘT lượt cuối; tệp resume ghi đè) ----
-HEAD_FILES = ('du_doan_86e_{kind}_{t}.npz', 'luot_86e_{kind}_{t}.json', 'nhat_ky_86e_{kind}_{t}.tar.gz')
+HEAD_FILES = ('du_doan_{label}_{kind}_{t}.npz', 'luot_{label}_{kind}_{t}.json', 'nhat_ky_{label}_{kind}_{t}.tar.gz')
+
+
+def run_label(run_tag):
+    '''Nhãn notebook trong tên tệp kết quả: RUN_TAG 'r86e_…' -> '86e', 'r86f_…' -> '86f' (C6 / C7 dùng chung giữa 86e và 86f).'''
+    m = re.match(r'r(86[a-z])_', run_tag)
+    assert m, f'RUN_TAG {run_tag!r} khong co dang r86<chu>_ -> DUNG'
+    return m.group(1)
 
 
 def resume_state(path, run_tag, khoi_phuc_cho, log=print):
-    '''tim_moi_noi(TEN_RESUME) -> trạng thái dict(run, t, xong={loại đầu: [tên tệp]}); có tệp thì trả tệp đang chờ về local (khoi_phuc_cho).
+    '''tim_moi_noi(TEN_RESUME) -> trạng thái dict(run, nhan, t, xong={loại đầu: [tên tệp]}); có tệp thì trả tệp đang chờ về local (khoi_phuc_cho).
        Không có tệp -> trạng thái mới, t = giờ hiện tại (hậu tố tên tệp kết quả của cả lượt).'''
     if not path:
-        return dict(run=run_tag, t=time.strftime('%Y%m%d_%H%M%S'), xong={})
+        return dict(run=run_tag, nhan=run_label(run_tag), t=time.strftime('%Y%m%d_%H%M%S'), xong={})
     import torch
     st = torch.load(path, map_location='cpu', weights_only=False)
     assert st.get('run') == run_tag, f"tep resume cua luot KHAC ({st.get('run')} != {run_tag}) -> DOI RUN_TAG o C0, KHONG xoa gi"
     khoi_phuc_cho(st.get('cho'))
     log(f"RESUME: luot {st['t']} da xong {sorted(st['xong']) or '-'} -> khoi phuc, KHONG chay lai")
-    return dict(run=st['run'], t=st['t'], xong={k: list(v) for k, v in st['xong'].items()})
+    return dict(run=st['run'], nhan=run_label(st['run']), t=st['t'], xong={k: list(v) for k, v in st['xong'].items()})
 
 
 def _write_bytes(path, b):
@@ -445,11 +592,11 @@ def _write_json(path, obj):
         json.dump(obj, f, ensure_ascii=False, indent=1)
 
 
-def save_head(result, kind, t, out_root, ghi):
+def save_head(result, kind, t, out_root, ghi, label='86e'):
     '''Kết quả một loại đầu -> 3 tệp qua ghi() (local + hàng chờ): dự đoán test (lần chấm test cuối của pha 2), kết quả (JSON; du_doan = tên tệp),
        nhật ký của họ (log, results_eval_linear.json, config.yaml, mọi lần chấm đã ghi (cham/) của mọi thư mục lượt chạy loại đầu này; KHÔNG .pth).
        result['du_doan'] trỏ sang bản local vừa ghi. -> [tên tệp] (thứ tự HEAD_FILES).'''
-    names = [f.format(kind=kind, t=t) for f in HEAD_FILES]
+    names = [f.format(label=label, kind=kind, t=t) for f in HEAD_FILES]
     with open(result['du_doan'], 'rb') as f:
         pred_bytes = f.read()
     result['du_doan'] = ghi(names[0], lambda q: _write_bytes(q, pred_bytes))
@@ -484,7 +631,7 @@ def head_step(kind, state, repo, package_dir, csv_root, checkpoint, config, out_
     if kind in state['xong']:
         return restore_head(state['xong'][kind], local_dir)
     result = run_head(kind, repo, package_dir, csv_root, checkpoint, config, out_root, log=log)
-    state['xong'][kind] = save_head(result, kind, state['t'], out_root, ghi)
+    state['xong'][kind] = save_head(result, kind, state['t'], out_root, ghi, label=state.get('nhan') or run_label(state['run']))
     save_state(state)
     return result
 

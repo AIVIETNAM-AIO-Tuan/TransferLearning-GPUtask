@@ -5,7 +5,8 @@ Không sửa tệp nào của tác giả (clone commit ghim, kiểm HEAD + sạc
     launch         tệp chạy dưới torchrun: đăng ký tên 'VinDr' (bọc _parse_dataset_str), ghi lại MỌI lần chấm của lượt học (bọc evaluate:
                    preds / target đúng như vào torchmetrics + số họ tính), rồi gọi main() của linear_glori.py nguyên văn
     runner         clone / kiểm repo, tải trọng số, kiểm nạp bằng hàm của họ, chạy torchrun (theo dõi tiến độ, bắt tràn bộ nhớ), đọc kết quả của họ,
-                   cổng trên lần chấm (AUROC tính lại = số họ tính; lr họ chọn đúng luật), dự đoán test = lần chấm test cuối của pha 2
+                   cổng trên lần chấm (AUROC tính lại = số họ tính; lr họ chọn đúng luật), dự đoán test = lần chấm test cuối của pha 2; 86f: dựng
+                   môi trường thư viện của họ (Python 3.9 + torch 2.0.0 + xFormers 0.0.18) và chạy tiến trình con bằng Python đó
     report         chấm dự đoán bằng torchmetrics 0.10.3 (bản họ ghim), bootstrap, đặt cạnh Bảng IV và nhánh sát bài của 86b
 
 Không import gì ở mức gói (launch chạy trong tiến trình torchrun riêng; runner / report import khi gọi)."""
