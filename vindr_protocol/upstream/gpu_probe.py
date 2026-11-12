@@ -122,10 +122,14 @@ def make_feature_input(vindr, out_npy, n=FEATURE_IMAGES, size=512):
 
 
 def run_features(out_npz, repo, config, ckpt, input_npy, amp, python=None, isolated=True, device='cuda', opts=('student.block_chunks=4',),
-                 timeout_s=FEAT_TIMEOUT_S):
-    '''probe_features.py bằng `python` -> dict(dat, info, ma_thoat, phut, duoi_loi, tep).'''
-    cmd = [python or sys.executable, FEAT_SCRIPT, '--repo', repo, '--config', config, '--ckpt', ckpt, '--input', input_npy, '--out', out_npz, '--amp', amp,
-           '--device', device, '--opts', *opts]
+                 timeout_s=FEAT_TIMEOUT_S, encoder=None, pkg=None):
+    '''probe_features.py bằng `python` -> dict(dat, info, ma_thoat, phut, duoi_loi, tep). encoder (86j): lớp bọc encoders_ho thay CheXFound (pkg =
+       thư mục chứa vindr_protocol; config / ckpt bỏ qua).'''
+    cmd = [python or sys.executable, FEAT_SCRIPT, '--repo', repo, '--input', input_npy, '--out', out_npz, '--amp', amp, '--device', device]
+    if encoder:
+        cmd += ['--encoder', encoder, '--pkg', pkg or os.path.dirname(os.path.dirname(HERE))]
+    else:
+        cmd += ['--config', config, '--ckpt', ckpt, '--opts', *opts]
     t0 = time.time()
     try:
         r = subprocess.run(cmd, env=child_env(isolated and python is not None), capture_output=True, text=True, timeout=timeout_s)
@@ -137,18 +141,31 @@ def run_features(out_npz, repo, config, ckpt, input_npy, amp, python=None, isola
 
 
 def compare_features(ref_npz, test_npz):
-    '''Sai số tương đối (max |Δ| / max |tham chiếu|) + cosine theo token (patch và cls, 4 tầng, mọi ảnh). -> dict.'''
+    '''Sai số tương đối (max |Δ| / max |tham chiếu|) + cosine theo token (patch và cls, 4 tầng, mọi ảnh; phần chỉ có ở cả hai tệp — lớp bọc không
+       token patch như BiomedCLIP: chỉ cls). -> dict.'''
     r, a = np.load(ref_npz), np.load(test_npz)
+    parts = [p for p in ('patch', 'cls') if p in r.files and p in a.files]
+    assert 'cls' in parts, 'thieu cls -> DUNG'
     out = {}
-    for part in ('patch', 'cls'):
+    for part in parts:
         R, A = r[part].astype(np.float64), a[part].astype(np.float64)
         assert R.shape == A.shape, (part, R.shape, A.shape)
         Rf, Af = R.reshape(-1, R.shape[-1]), A.reshape(-1, A.shape[-1])
         cos = (Rf * Af).sum(1) / np.maximum(np.linalg.norm(Rf, axis=1) * np.linalg.norm(Af, axis=1), 1e-12)
         out[part] = dict(lech_tuong_doi=float(np.abs(A - R).max() / max(np.abs(R).max(), 1e-12)), cos_min=float(cos.min()), cos_tb=float(cos.mean()))
-    out['lech_tuong_doi'] = max(out['patch']['lech_tuong_doi'], out['cls']['lech_tuong_doi'])
-    out['cos_min'] = min(out['patch']['cos_min'], out['cls']['cos_min'])
+    out['lech_tuong_doi'] = max(out[p]['lech_tuong_doi'] for p in parts)
+    out['cos_min'] = min(out[p]['cos_min'] for p in parts)
+    out['phan'] = parts
     return out
+
+
+ENCODER_GATE = dict(lech=2e-2, cos_min=0.999)        # §16.4: lớp bọc ở môi trường cũ (fp16) so tham chiếu fp32 môi trường mới (ngưỡng fp16 như §15.2)
+
+
+def encoder_gate(cmp):
+    '''86j §16.4: -> dict(dat, ...) từ compare_features(tham chiếu fp32 môi trường mới, môi trường cũ fp16).'''
+    return dict(dat=bool(cmp['lech_tuong_doi'] <= ENCODER_GATE['lech'] and cmp['cos_min'] >= ENCODER_GATE['cos_min']), luat=dict(ENCODER_GATE),
+                lech=cmp['lech_tuong_doi'], cos_min=cmp['cos_min'], phan=cmp['phan'])
 
 
 def feature_rule(cmp_old, cmp_new, rule=FEATURE_RULE):

@@ -1,14 +1,16 @@
 """Tệp chạy dưới torchrun cho `linear_glori.py` của CheXFound NGUYÊN VĂN (PLAN_86 §12.2–12.3). Cần PYTHONPATH chứa repo CheXFound (commit ghim) và
 thư mục gói vindr_protocol. Chạy: torchrun --nproc_per_node=1 <đường dẫn tệp này> <tham số y như linear_glori.py>.
 
-Chỉ làm hai việc trước khi gọi main() của họ (không sửa tệp nào của họ; các hàm được tra theo tên trong module lúc gọi nên bọc từ ngoài là đủ):
+Chỉ làm hai việc (thêm việc 3 ở 86j) trước khi gọi main() của họ (không sửa tệp nào của họ; các hàm được tra theo tên trong module lúc gọi nên bọc từ ngoài là đủ):
   1. đăng ký tên dataset 'VinDr': chexfound.data.loaders._parse_dataset_str được bọc — tên 'VinDr' -> vindr_dataset.parse_dataset_str, tên khác ->
      hàm gốc (make_dataset của họ tra hàm này theo tên trong module lúc gọi);
   2. GHI LẠI MỌI LẦN CHẤM của lượt học (Tuấn 12/11: dự đoán lấy thẳng từ lần chấm cuối có sẵn trong lượt học, không chạy --infer riêng):
      linear_glori.evaluate (= chexfound.eval.utils.evaluate, hàm evaluate_linear_classifiers gọi) được bọc — mỗi postprocessor (LinearPostprocessor
      của họ: preds = sigmoid(đầu đọc(đặc trưng))) được bọc để chép (preds, target) ĐÚNG như vừa đưa vào metric.update, rồi gọi evaluate gốc; số họ
      tính (metric.compute) ghi kèm. Phép tính, thứ tự gọi, chế độ train / eval của đầu đọc và RNG không đổi (chỉ chép tensor ra CPU).
-     Mỗi lần chấm -> <output-dir>/cham/<thứ tự>_<tách>_iter<k>.npz (target + preds từng đầu) + .json (tên đầu, số họ tính, prefixstring)."""
+     Mỗi lần chấm -> <output-dir>/cham/<thứ tự>_<tách>_iter<k>.npz (target + preds từng đầu) + .json (tên đầu, số họ tính, prefixstring).
+  3. (86j, PLAN_86 §16; chỉ khi đặt biến VP_ENCODER) thay mô hình CheXFound bằng lớp bọc encoders_ho trong setup_and_build_model — vẫn setup(args) +
+     autocast fp16 theo config của họ (inject_encoder)."""
 import json
 import os
 import sys
@@ -79,11 +81,36 @@ def record_evaluations(linear_glori, out_dir):
     return orig_elc, orig_eval
 
 
+ENCODER_ENV = 'VP_ENCODER'       # 86j (PLAN_86 §16): tên lớp bọc trong encoders_ho; không đặt -> mô hình CheXFound của họ (86e / 86f / 86g)
+
+
+def inject_encoder(linear_glori, name):
+    '''86j: thay linear_glori.setup_and_build_model — VẪN gọi setup(args) (phân tán, log, config) và get_autocast_dtype(config) (fp16 theo config
+       của họ) của chexfound.eval.setup, CHỈ thay mô hình bằng lớp bọc `name` (encoders_ho). main() của họ tra tên này trong module lúc gọi. Trả hàm gốc.'''
+    import torch.backends.cudnn as cudnn
+    from chexfound.eval import setup as ev_setup
+
+    from vindr_protocol.upstream import encoders_ho
+    original = linear_glori.setup_and_build_model
+
+    def setup_and_build_model(args):
+        cudnn.benchmark = True                                   # như hàm gốc
+        config = ev_setup.setup(args)
+        model = encoders_ho.build(name)
+        model.cuda()
+        return model, ev_setup.get_autocast_dtype(config)
+    setup_and_build_model._encoder = name
+    linear_glori.setup_and_build_model = setup_and_build_model
+    return original
+
+
 def main(argv=None):
     register_vindr()
     from chexfound.eval.classification import linear_glori
     args = linear_glori.get_args_parser(description='DINOv2 linear evaluation').parse_args(argv)
     assert not args.infer, '86e lay du doan tu cac lan cham trong luot hoc (Tuan 12/11) -> khong dung --infer'
+    if os.environ.get(ENCODER_ENV):
+        inject_encoder(linear_glori, os.environ[ENCODER_ENV])
     record_evaluations(linear_glori, os.path.join(args.output_dir, EVAL_DIR))
     return linear_glori.main(args)
 

@@ -281,3 +281,93 @@ def _print(out, log):
                 + ' | '.join(f"{n}: " + ', '.join(f'{lr} {v:.4f}' for lr, v in va[n].items()) for n in ('nua1', 'nua2')))
         log(f"tieu chi (dat truoc, PLAN_86 12.5): AP bai trong CI ma goc {'CO' if k['ap_bai_trong_ci'] else 'KHONG'} | AUROC bai trong CI "
             f"{'CO' if k['auroc_bai_trong_ci'] else 'KHONG'} -> {'TAI TAO DUOC' if k['tai_tao_duoc'] else 'CHUA tai tao'}")
+
+
+# ===================================================================================== 86j (PLAN_86 §16): encoder KHÁC qua mã + môi trường của họ
+PAPER_TABLE_IV_ENC = {          # bài CheXFound Bảng IV, VinDr-CXR (AUPRC = AP bậc thang của torchmetrics; TB bootstrap — suy luận §11.6)
+    'raddino': {'lin': dict(ap=0.102, ap_ci=(0.096, 0.107), auroc=0.477, auroc_ci=(0.441, 0.507)),
+                'glori': dict(ap=0.155, ap_ci=(0.147, 0.163), auroc=0.680, auroc_ci=(0.630, 0.718))},
+    'biomedclip': {'lin': dict(ap=0.100, ap_ci=(0.094, 0.106), auroc=0.587, auroc_ci=(0.544, 0.618)),
+                   'glori': dict(ap=0.094, ap_ci=(0.089, 0.102), auroc=0.537, auroc_ci=(0.497, 0.566))}}
+ENCODER_PAPER_KEY = {'raddino_kieu_ho': 'raddino', 'raddino_chuan': 'raddino', 'biomedclip_ho': 'biomedclip'}
+ENCODER_TEXT = {'raddino_kieu_ho': 'RAD-DINO (a) kieu lop boc HF cua ho: hidden_states tho, chuan hoa ImageNet, anh 512',
+                'raddino_chuan': 'RAD-DINO (b) chuan: qua layernorm cuoi, chuan hoa RAD-DINO, anh 518',
+                'biomedclip_ho': 'BiomedCLIP lop boc BiomedCLIPBase cua ho (vector 512), anh 224'}
+
+
+def run_encoder(results, vindr, encoder, kiem_ke, tai, xung_dot, label='86j', n_boot=N_BOOT, seed=BOOT_SEED, log=print):
+    """86j (§16.5) — CHỈ MÔ TẢ. results = {đầu: run_head(...)} của encoder (BiomedCLIP: chỉ 'lin'). Chấm như run (28 cột torchmetrics 0.10.3, TB +
+       CI95 bootstrap), cạnh Bảng IV của CHÍNH encoder đó (+ hàng CheXFound của bài, bối cảnh) và CheXFound 86f (hiệu ghép cặp encoder − CheXFound, cùng
+       mã / môi trường / GPU / dữ liệu / lần rút). "Tái tạo số bài" = AUPRC (= AP bậc thang) VÀ AUROC của Bảng IV cùng trong CI95 của hàng."""
+    te = vindr.indices('test')
+    target = vindr.labels[te].astype(np.int64)
+    main_idx = [vindr.label_names.index(c) for c in vindr.main_classes]
+    boot_idx = bootstrap_indices(len(te), n_boot, seed)
+    rows_86f, src_86f = load_ref_rows(kiem_ke, tai, xung_dot, vindr, '86f', RESULT_86F, log=log)
+    paper = PAPER_TABLE_IV_ENC[ENCODER_PAPER_KEY[encoder]]
+    ci = lambda v: [float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))]
+    out = dict(n_boot=n_boot, hat=seed, nhan=label, encoder=encoder, bang_iv=paper, bang_iv_chexfound=PAPER_TABLE_IV, nguon_86f=src_86f, hang={},
+               hieu_86f={}, ket_luan={}, cong={})
+    for t, r in results.items():
+        with np.load(r['du_doan']) as z:
+            preds, tgt = z['preds'].astype(np.float64), z['target'].astype(np.int64)
+        assert preds.shape == target.shape and np.array_equal(tgt, target), f'{t}: target lan cham test KHAC nhan test (thu tu CSV) -> DUNG'
+        assert r.get('encoder') == encoder, f"{t}: luot hoc encoder {r.get('encoder')!r} != {encoder!r} -> DUNG"
+        row, boot = score_row(preds, target, main_idx, boot_idx)
+        printed = r['test_ho_ghi_cuoi_pha2']['ket_qua']['auroc']
+        out['cong'][t] = dict(auroc_ho_tinh=float(printed), auroc_tinh_lai=row['auroc28'], cong_val=r['cong']['val'],
+                              trung=bool(abs(printed - row['auroc28']) < 5e-5 and r['cong']['test']['dat'] and r['cong']['val']['dat']))
+        out['hang'][t] = dict(encoder=dict(**row, lr=r['chon']['lr'], auroc_val=r['chon']['auroc_val'], hai_nua=r['hai_nua'], anh=r.get('anh')))
+        if rows_86f is not None:
+            row_f, boot_f = score_row(rows_86f[t]['probs'], target, main_idx, boot_idx)
+            out['hang'][t]['chexfound_86f'] = dict(**row_f, lr=rows_86f[t]['lr'], anh=rows_86f[t]['anh'], hai_nua=rows_86f[t]['hai_nua'])
+            d = boot - boot_f
+            out['hieu_86f'][t] = dict(ap28=row['ap28'] - row_f['ap28'], ap28_ci=ci(d[:, 0]), auroc28=row['auroc28'] - row_f['auroc28'],
+                                      auroc28_ci=ci(d[:, 1]))
+        p = paper[t]
+        k = dict(ap_bai_trong_ci=bool(row['ap28_ci'][0] <= p['ap'] <= row['ap28_ci'][1]),
+                 auroc_bai_trong_ci=bool(row['auroc28_ci'][0] <= p['auroc'] <= row['auroc28_ci'][1]))
+        k['tai_tao_duoc'] = k['ap_bai_trong_ci'] and k['auroc_bai_trong_ci']
+        out['ket_luan'][t] = k
+    _print_encoder(out, log)
+    return out
+
+
+def _print_encoder(out, log):
+    fm = lambda v: f'{v:.3f}'
+    fci = lambda c: f'[{c[0]:.3f}; {c[1]:.3f}]'
+    enc = out['encoder']
+    log(f"=== C8 · {ENCODER_TEXT[enc]} — MA + MOI TRUONG CUA CheXFound ({out['nhan']}) vs Bang IV vs CheXFound 86f (cung ma / moi truong / GPU / du lieu)"
+        f" — test 3.000 anh, 28 cot torchmetrics 0.10.3; TB + CI95 = {out['n_boot']} lan rut anh (hat {out['hat']}); CHI MO TA ===")
+    if out['nguon_86f'] is None:
+        log('86f chua co ket qua tren Drive -> chua co hang / hieu ghep cap voi CheXFound')
+    for t in out['hang']:
+        h, p, c, pc = out['hang'][t], out['bang_iv'][t], out['cong'][t], out['bang_iv_chexfound'][t]
+        cv = c['cong_val']
+        log(f"\n--- {HEAD_TEXT[t]} --- cong: AUROC test ho tinh {c['auroc_ho_tinh']:.4f} | tinh lai {c['auroc_tinh_lai']:.4f} -> "
+            f"{'TRUNG' if c['trung'] else '⚠ LECH'} | val cuoi pha 1: {cv['so_dau']} lr, lech max {cv['lech_max']:.1e}, lr ho chon "
+            f"{'DUNG' if cv['chon_dung_luat'] else '⚠ SAI'} luat")
+        log(f"{'hang (dieu kien)':<84}{'AP28':>7}{'AP28 TB [CI95]':>24}{'AUROC28':>9}{'AUROC28 TB [CI95]':>24}{'AP27':>7}{'AUROC27':>9}{'AUPRC27':>9}"
+            f"{'mAP21':>7}")
+        log(f"{'BAI Bang IV: ' + ENCODER_PAPER_KEY[enc]:<84}{'':>7}{fm(p['ap']) + ' ' + fci(p['ap_ci']):>24}{'':>9}"
+            f"{fm(p['auroc']) + ' ' + fci(p['auroc_ci']):>24}")
+        log(f"{'BAI Bang IV: CheXFound (boi canh)':<84}{'':>7}{fm(pc['ap']) + ' ' + fci(pc['ap_ci']):>24}{'':>9}"
+            f"{fm(pc['auroc']) + ' ' + fci(pc['auroc_ci']):>24}")
+        e0 = h['encoder']
+        rows_txt = [('encoder', f"{enc} qua ma + moi truong cua ho, anh {e0['anh']}, lr {e0['lr']:g} (val AUROC {e0['auroc_val']:.4f})"
+                                + (', 2 nua luoi' if e0['hai_nua'] else ''))]
+        if 'chexfound_86f' in h:
+            f0 = h['chexfound_86f']
+            rows_txt.append(('chexfound_86f', f"CheXFound 86f (ma + moi truong cua ho, A100, anh {f0['anh']}), lr {f0['lr']:g}"
+                                              + (', 2 nua luoi' if f0['hai_nua'] else '')))
+        for key, text in rows_txt:
+            x = h[key]
+            log(f"{text[:83]:<84}{fm(x['ap28']):>7}{fm(x['ap28_tb']) + ' ' + fci(x['ap28_ci']):>24}{fm(x['auroc28']):>9}"
+                f"{fm(x['auroc28_tb']) + ' ' + fci(x['auroc28_ci']):>24}{fm(x['ap27']):>7}{fm(x['auroc27']):>9}{fm(x['auprc27']):>9}{fm(x['ap21']):>7}")
+        if t in out['hieu_86f']:
+            e = out['hieu_86f'][t]
+            log(f"hieu {enc} - CheXFound 86f (ghep cap, cung lan rut): AP28 {e['ap28']:+.3f} {fci(e['ap28_ci'])} | AUROC28 {e['auroc28']:+.3f} "
+                f"{fci(e['auroc28_ci'])}")
+        k = out['ket_luan'][t]
+        log(f"tieu chi (dat truoc, PLAN_86 16.5): AP bai trong CI {'CO' if k['ap_bai_trong_ci'] else 'KHONG'} | AUROC bai trong CI "
+            f"{'CO' if k['auroc_bai_trong_ci'] else 'KHONG'} -> {'TAI TAO DUOC so bai' if k['tai_tao_duoc'] else 'KHONG tai tao duoc so bai'}")

@@ -28,7 +28,7 @@ LINEAR_GLORI_MD5 = '123bf478c4cdaf548084e618facb4f5f'          # md5 (LF) bản 
 LAUNCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'launch.py')
 OPTS = ('student.block_chunks=4',)                               # G7: config.yaml ghi 0, checkpoint 4 khúc -> không chỉnh thì 24 tầng không nạp
 BATCH, IMAGE_SIZE = 256, 512                                     # 1 GPU x 256 = lô hiệu dụng 4 x 64 của README; ảnh 512 như script / README của họ
-IMAGE_SIZES = (224, 512)    # 512: script / README của họ (86e / 86f); 224: mặc định --image-size của linear_glori.py (86g, PLAN_86 §14.1)
+IMAGE_SIZES = (224, 512, 518)   # 512: script / README của họ (86e / 86f); 224: mặc định --image-size (86g §14.1; BiomedCLIP 86j); 518: RAD-DINO (86j §16)
 PAPER_LRS = (1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3)   # §IV-A.2 của bài — Linear VÀ GLoRI (Tuấn 12/11, PLAN_86 §13.1)
 GLORI_HALVES = (PAPER_LRS[:5], PAPER_LRS[5:])                   # khi 9 đầu GLoRI cùng lúc tràn bộ nhớ (PLAN_86 §12.3)
 # ---- môi trường THƯ VIỆN CỦA HỌ cho 86f (PLAN_86 §13.2): conda-extras.yaml = Python 3.9, pytorch 2.0.0 + pytorch-cuda 11.7, torchvision 0.15.0,
@@ -346,6 +346,8 @@ def run_torchrun(repo, package_dir, args, log_path, poll_s=180, log=print):
     '''torchrun --nproc_per_node=1 launch.py <args> (mã của họ); stdout + stderr vào log_path; mỗi poll_s giây in dòng tiến độ cuối của họ.
        -> dict(ma_thoat, phut, tran_bo_nho, duoi_log).'''
     env = child_env(repo, package_dir)
+    env.pop('VP_ENCODER', None)
+    if ENCODER: env['VP_ENCODER'] = ENCODER                  # 86j: tệp chạy thay mô hình CheXFound bằng lớp bọc này (launch.inject_encoder)
     if USE_TORCHRUN:
         cmd = [_child_python(), '-m', 'torch.distributed.run', '--nproc_per_node=1', '--standalone', LAUNCH, *[str(a) for a in args]]
     else:                    # bản kiểm trên máy (Windows: torchrun --standalone cần libuv): một tiến trình, biến môi trường phân tán đặt tay
@@ -489,6 +491,26 @@ def set_image_size(n):
     return IMAGE_SIZE
 
 
+ENCODER = None           # 86j (PLAN_86 §16): tên lớp bọc encoders_ho cho MỌI lượt (biến VP_ENCODER của tiến trình torchrun); None = CheXFound
+GLORI_FORCE_HALVES = False   # 86j: GLoRI chạy THẲNG hai nửa lưới 5 + 4 như 86f (cùng cấu trúc chia cho mọi encoder), không thử 9 lr một lượt
+
+
+def set_encoder(name):
+    '''86j: encoder cho MỌI lượt sau đó (chạy thử, Linear, GLoRI) — lớp bọc encoders_ho, thay mô hình CheXFound trong mã họ. -> tên.'''
+    global ENCODER
+    from .encoders_ho import NAMES
+    assert name in NAMES, f'encoder {name!r} khong thuoc {NAMES} -> DUNG'
+    ENCODER = name
+    return ENCODER
+
+
+def set_glori_halves(flag=True):
+    '''86j: True -> run_head('glori') chạy thẳng GLORI_HALVES (5 + 4) như 86f, kể cả khi 9 lr vừa bộ nhớ (§16.1). -> cờ.'''
+    global GLORI_FORCE_HALVES
+    GLORI_FORCE_HALVES = bool(flag)
+    return GLORI_FORCE_HALVES
+
+
 EXTRA_ARGS = ()          # tham số thêm cho MỌI lượt (Colab: rỗng = mặc định của họ; bản kiểm trên máy: --num-workers 0)
 USE_TORCHRUN = True      # Colab: torchrun --nproc_per_node=1 như README của họ; bản kiểm trên Windows: False
 
@@ -550,12 +572,18 @@ def run_head(kind, repo, package_dir, csv_root, checkpoint, config, out_root, lo
        CUỐI của pha 2 trong lượt thắng (không chạy --infer riêng); cổng check_run trên MỌI lượt (hai nửa: cả hai).'''
     t0 = time.time()
     lrs = PAPER_LRS
-    log(f"== {kind}: hoc bang ma cua ho (luoi {len(lrs)} lr cua bai, lo {BATCH}, anh {IMAGE_SIZE}, 10 + 10 epoch)")
-    runs = [train_once(kind, repo, package_dir, csv_root, checkpoint, config, os.path.join(out_root, f'{kind}_hoc'), lrs, log=log)]
-    if runs[0]['chay']['ma_thoat'] != 0 and kind == 'glori' and runs[0]['chay']['tran_bo_nho']:
-        log('  ! GLoRI 9 lr cung luc TRAN BO NHO -> chay hai nua luoi (PLAN_86 12.3)')
-        runs = [train_once(kind, repo, package_dir, csv_root, checkpoint, config, os.path.join(out_root, f'{kind}_hoc_nua{i + 1}'), half, log=log)
-                for i, half in enumerate(GLORI_HALVES)]
+    forced = kind == 'glori' and GLORI_FORCE_HALVES
+    log(f"== {kind}: hoc bang ma cua ho (luoi {len(lrs)} lr cua bai, lo {BATCH}, anh {IMAGE_SIZE}, 10 + 10 epoch" + (f', encoder {ENCODER}' if ENCODER else '')
+        + (', hai nua luoi 5 + 4 BAT BUOC nhu 86f' if forced else '') + ')')
+    halves = lambda: [train_once(kind, repo, package_dir, csv_root, checkpoint, config, os.path.join(out_root, f'{kind}_hoc_nua{i + 1}'), half, log=log)
+                      for i, half in enumerate(GLORI_HALVES)]
+    if forced:
+        runs = halves()
+    else:
+        runs = [train_once(kind, repo, package_dir, csv_root, checkpoint, config, os.path.join(out_root, f'{kind}_hoc'), lrs, log=log)]
+        if runs[0]['chay']['ma_thoat'] != 0 and kind == 'glori' and runs[0]['chay']['tran_bo_nho']:
+            log('  ! GLoRI 9 lr cung luc TRAN BO NHO -> chay hai nua luoi (PLAN_86 12.3)')
+            runs = halves()
     for r in runs:
         assert r['chay']['ma_thoat'] == 0, f"hoc {kind} ({r['thu_muc']}) THAT BAI:\n{r['chay']['duoi_log']}"
     checks = [check_run(r, csv_root) for r in runs]
@@ -568,7 +596,8 @@ def run_head(kind, repo, package_dir, csv_root, checkpoint, config, out_root, lo
     pred_path = _write_test_predictions(winner['thu_muc'], checks[k]['du_doan_test'])
     return dict(loai=kind, luot=[dict(thu_muc=r['thu_muc'], lrs=r['lrs'], phut=r['chay']['phut'], chon=c, cong={s: x[s] for s in ('val', 'test')})
                                  for r, c, x in zip(runs, choices, checks)],
-                thang=k, chon=choices[k], hai_nua=len(runs) > 1, anh=IMAGE_SIZE, test_ho_ghi_cuoi_pha2=(test_blocks[-1] if test_blocks else None),
+                thang=k, chon=choices[k], hai_nua=len(runs) > 1, hai_nua_bat_buoc=forced, encoder=ENCODER, anh=IMAGE_SIZE,
+                test_ho_ghi_cuoi_pha2=(test_blocks[-1] if test_blocks else None),
                 cong={s: checks[k][s] for s in ('val', 'test')}, du_doan=pred_path, phut_tong=(time.time() - t0) / 60)
 
 
