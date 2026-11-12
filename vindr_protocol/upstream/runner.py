@@ -28,6 +28,7 @@ LINEAR_GLORI_MD5 = '123bf478c4cdaf548084e618facb4f5f'          # md5 (LF) bản 
 LAUNCH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'launch.py')
 OPTS = ('student.block_chunks=4',)                               # G7: config.yaml ghi 0, checkpoint 4 khúc -> không chỉnh thì 24 tầng không nạp
 BATCH, IMAGE_SIZE = 256, 512                                     # 1 GPU x 256 = lô hiệu dụng 4 x 64 của README; ảnh 512 như script / README của họ
+IMAGE_SIZES = (224, 512)    # 512: script / README của họ (86e / 86f); 224: mặc định --image-size của linear_glori.py (86g, PLAN_86 §14.1)
 PAPER_LRS = (1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3)   # §IV-A.2 của bài — Linear VÀ GLoRI (Tuấn 12/11, PLAN_86 §13.1)
 GLORI_HALVES = (PAPER_LRS[:5], PAPER_LRS[5:])                   # khi 9 đầu GLoRI cùng lúc tràn bộ nhớ (PLAN_86 §12.3)
 # ---- môi trường THƯ VIỆN CỦA HỌ cho 86f (PLAN_86 §13.2): conda-extras.yaml = Python 3.9, pytorch 2.0.0 + pytorch-cuda 11.7, torchvision 0.15.0,
@@ -477,6 +478,15 @@ def _dataset_args(csv_root):
     return ['--train-dataset', dataset_str('train', csv_root), '--val-dataset', dataset_str('val', csv_root), '--test-dataset', dataset_str('test', csv_root)]
 
 
+def set_image_size(n):
+    '''--image-size cho MỌI lượt chạy sau đó (chạy thử, Linear, GLoRI). 86g: 224 = mặc định của linear_glori.py (PLAN_86 §14.1) — chỉ đổi một
+       điều so với 86f. Chỉ nhận IMAGE_SIZES. -> kích thước đã đặt.'''
+    global IMAGE_SIZE
+    assert int(n) in IMAGE_SIZES, f'kich thuoc anh {n} khong thuoc {IMAGE_SIZES} -> DUNG'
+    IMAGE_SIZE = int(n)
+    return IMAGE_SIZE
+
+
 EXTRA_ARGS = ()          # tham số thêm cho MỌI lượt (Colab: rỗng = mặc định của họ; bản kiểm trên máy: --num-workers 0)
 USE_TORCHRUN = True      # Colab: torchrun --nproc_per_node=1 như README của họ; bản kiểm trên Windows: False
 
@@ -556,7 +566,7 @@ def run_head(kind, repo, package_dir, csv_root, checkpoint, config, out_root, lo
     pred_path = _write_test_predictions(winner['thu_muc'], checks[k]['du_doan_test'])
     return dict(loai=kind, luot=[dict(thu_muc=r['thu_muc'], lrs=r['lrs'], phut=r['chay']['phut'], chon=c, cong={s: x[s] for s in ('val', 'test')})
                                  for r, c, x in zip(runs, choices, checks)],
-                thang=k, chon=choices[k], hai_nua=len(runs) > 1, test_ho_ghi_cuoi_pha2=(test_blocks[-1] if test_blocks else None),
+                thang=k, chon=choices[k], hai_nua=len(runs) > 1, anh=IMAGE_SIZE, test_ho_ghi_cuoi_pha2=(test_blocks[-1] if test_blocks else None),
                 cong={s: checks[k][s] for s in ('val', 'test')}, du_doan=pred_path, phut_tong=(time.time() - t0) / 60)
 
 
@@ -664,7 +674,7 @@ def head_summary(result):
     '''Một dòng mô tả lượt của một loại đầu (KHÔNG có số test — số test ở ô chấm).'''
     c, g = result['chon'], result['cong']
     when = 'KHOI PHUC tu tep resume' if result.get('khoi_phuc') else f"{result['phut_tong']:.0f} phut"
-    return (f"{result['loai']}: lr chon {c['lr']:g} (AUROC val pha 1 {c['auroc_val']:.4f}, dropout bat)"
+    return (f"{result['loai']}: anh {result.get('anh', 512)} | lr chon {c['lr']:g} (AUROC val pha 1 {c['auroc_val']:.4f}, dropout bat)"
             + (' | 2 nua luoi (9 lr cung luc tran bo nho)' if result['hai_nua'] else '') + ' | luot: '
             + ', '.join(f"{os.path.basename(x['thu_muc'])} {x['phut']:.0f} phut" for x in result['luot'])
             + f" | cong lan cham: val {g['val']['so_dau']} lr, AUROC tinh lai - ho tinh lech max {g['val']['lech_max']:.1e}, lr ho chon "
