@@ -19,4 +19,4 @@ Mỗi tệp một trách nhiệm:
 
 Notebook chỉ gọi hàm; khối Drive chuẩn (khoi_doc_drive / khoi_ghi_drive / khoi_ghi_cuoi) vẫn ở ô C0 của notebook và được truyền vào
 dưới dạng hàm (kiem_ke, tai, xung_dot, ghi, ghi_json) — gói không chứa ID Drive."""
-__version__ = '0.3.0'
+__version__ = '0.3.1'

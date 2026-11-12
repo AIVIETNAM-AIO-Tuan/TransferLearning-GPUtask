@@ -240,11 +240,72 @@ def lr_from_name(name):
     return float(f'{m.group(1)}.{m.group(2)}')
 
 
-def parse_infer_metrics(log_text):
-    '''Dòng "-- Classifier: <tên> * {'ap': tensor(x...), 'auroc': tensor(y...)}" mà evaluate_linear_classifiers_preds của họ ghi ở --infer.'''
-    m = re.search(r"-- Classifier: (\S+) \* \{'ap': tensor\(([-0-9.eE+]+)[^}]*'auroc': tensor\(([-0-9.eE+]+)", log_text)
-    assert m, 'khong thay dong chi so --infer cua ho trong log -> DUNG'
-    return dict(ten=m.group(1), ap=float(m.group(2)), auroc=float(m.group(3)))
+CHECK_TOL = 5e-5          # |AUROC tính lại trên CPU − số họ tính trên GPU| từ CÙNG preds
+
+
+def read_evaluations(run_dir):
+    '''Các lần chấm launch.record_evaluations đã ghi trong thư mục lượt chạy, theo thứ tự gọi -> [dict(thu_tu, tach, iteration, prefix, ten (tên đầu),
+       so_ho_tinh ({tên đầu: {chỉ số: giá trị họ tính}}), npz)].'''
+    from .launch import EVAL_DIR
+    d = os.path.join(run_dir, EVAL_DIR)
+    recs = []
+    for f in (sorted(os.listdir(d)) if os.path.isdir(d) else []):
+        if f.endswith('.json'):
+            with open(os.path.join(d, f), encoding='utf-8') as fh:
+                rec = json.load(fh)
+            rec['npz'] = os.path.join(d, f[:-len('.json')] + '.npz')
+            recs.append(rec)
+    assert recs, f'{d}: khong co lan cham nao duoc ghi -> DUNG'
+    return sorted(recs, key=lambda r: r['thu_tu'])
+
+
+def load_evaluation(rec):
+    '''-> (target [N, C] int64, {tên đầu: preds [N, C] float32}) — đúng tensor đã vào metric.update của họ.'''
+    import numpy as np
+    with np.load(rec['npz']) as z:
+        return z['target'].astype(np.int64), {name: z[f'preds_{j}'] for j, name in enumerate(rec['ten'])}
+
+
+def _csv_labels(csv_root, split):
+    import pandas as pd
+    df = pd.read_csv(os.path.join(csv_root, f'{split}.csv'))
+    return df.drop(columns=['Path']).to_numpy().astype('int64')
+
+
+def check_run(run, csv_root):
+    '''Cổng trên MỘT lượt học (đọc lần chấm đã ghi + results_eval_linear.json của họ):
+       (1) lần chấm val CUỐI (pha 1): AUROC tính lại (torchmetrics 0.10.3, CPU) từng lr = số họ tính; lr họ chọn = lr có AUROC (số họ tính) lớn nhất,
+           hoà -> lr đứng trước (so sánh '>' của họ); kèm: lr có AUROC tính lại lớn nhất có trùng không; target = val.csv;
+       (2) lần chấm test CUỐI (pha 2, một đầu = lr chọn): AUROC tính lại = số họ tính = khối test cuối họ ghi; target = test.csv theo thứ tự.
+       -> dict(val, test, du_doan_test (preds, target)).'''
+    from .report import tm_scores
+    recs, blocks = read_evaluations(run['thu_muc']), run['ket_qua']
+    out = {}
+    for split in ('val', 'test'):
+        rs, bs = [r for r in recs if r['tach'] == split], [b for b in blocks if b['tach'] == split]
+        assert rs and bs, f"{run['thu_muc']}: thieu lan cham / khoi {split} -> DUNG"
+        rec, blk = rs[-1], bs[-1]
+        target, preds = load_evaluation(rec)
+        assert np_equal(target, _csv_labels(csv_root, split)), f'{split}: target lan cham KHAC nhan {split}.csv (thu tu) -> DUNG'
+        ours = {n: tm_scores(p, target)[1] for n, p in preds.items()}
+        theirs = {n: rec['so_ho_tinh'][n]['auroc'] for n in rec['ten']}
+        best_theirs = max(rec['ten'], key=lambda n: (theirs[n], -rec['ten'].index(n)))
+        best_ours = max(rec['ten'], key=lambda n: (ours[n], -rec['ten'].index(n)))
+        lech = max(abs(ours[n] - theirs[n]) for n in rec['ten'])
+        out[split] = dict(iteration=rec['iteration'], buoc_khoi=blk['buoc'], so_dau=len(rec['ten']), lech_max=float(lech), ten_ho_chon=blk['ten'],
+                          auroc_ho_ghi=float(blk['ket_qua']['auroc']), auroc_tinh_lai=float(ours[blk['ten']]) if blk['ten'] in ours else None,
+                          chon_dung_luat=bool(blk['ten'] == best_theirs), chon_trung_tinh_lai=bool(best_ours == best_theirs),
+                          dat=bool(lech < CHECK_TOL and blk['ten'] == best_theirs and rec['iteration'] == blk['buoc']
+                                   and abs(theirs[blk['ten']] - float(blk['ket_qua']['auroc'])) < 1e-6))
+        if split == 'test':
+            assert len(rec['ten']) == 1, f"lan cham test cuoi co {len(rec['ten'])} dau (pha 2 phai MOT dau) -> DUNG"
+            out['du_doan_test'] = (preds[rec['ten'][0]], target)
+    return out
+
+
+def np_equal(a, b):
+    import numpy as np
+    return a.shape == b.shape and bool(np.array_equal(a, b))
 
 
 def _dataset_args(csv_root):
@@ -297,27 +358,20 @@ def phase1_choice(results):
     return dict(ten=last['ten'], lr=lr_from_name(last['ten']), auroc_val=float(last['ket_qua']['auroc']), buoc=last['buoc'])
 
 
-def infer(kind, repo, package_dir, csv_root, checkpoint, config, winner_dir, out_dir, log=print):
-    '''--infer của họ trên test với đầu pha 2 của lượt thắng (optimal/model_final.pth); --val-metric-type multilabel_ap -> họ in AP + AUROC;
-       tệp chạy lưu preds / target. -> dict(chi_so_ho_in, du_doan (đường dẫn), chay).'''
-    import numpy as np
+PRED_FILE = 'du_doan_test.npz'      # dự đoán của lần chấm test CUỐI (pha 2) của lượt thắng: preds (sigmoid của họ) + target
 
-    from .launch import PRED_FILE
-    _fresh_dir(out_dir)
-    args = (['--infer','--classifier-fpath', os.path.join(winner_dir, 'optimal', 'model_final.pth'), '--val-metric-type', 'multilabel_ap',
-             '--output-dir', out_dir] + _common_args(csv_root, checkpoint, config) + _head_args(kind) + ['--opts', *OPTS])
-    run = run_torchrun(repo, package_dir, args, os.path.join(out_dir, 'chay.log'), log=log)
-    assert run['ma_thoat'] == 0, f"--infer {kind} THAT BAI:\n{run['duoi_log']}"
-    text = open(os.path.join(out_dir, 'chay.log'), encoding='utf-8', errors='replace').read()
-    pred_path = os.path.join(out_dir, PRED_FILE)
-    with np.load(pred_path) as z:
-        assert z['preds'].ndim == 2 and np.isfinite(z['preds']).all(), 'du doan --infer sai hinh / khong huu han -> DUNG'
-    return dict(chi_so_ho_in=parse_infer_metrics(text), du_doan=pred_path, chay=dict(ma_thoat=run['ma_thoat'], phut=run['phut']))
+
+def _write_test_predictions(run_dir, preds_target):
+    import numpy as np
+    path = os.path.join(run_dir, PRED_FILE)
+    np.savez_compressed(path, preds=preds_target[0].astype(np.float32), target=preds_target[1].astype(np.int64))
+    return path
 
 
 def run_head(kind, repo, package_dir, csv_root, checkpoint, config, out_root, log=print):
     '''Đầy đủ một loại đầu bằng mã của họ. Linear: lưới mặc định 13 lr, một lượt. GLoRI: lưới 9 lr của bài, một lượt; TRÀN BỘ NHỚ -> hai nửa lưới
-       (5 + 4), lr thắng = AUROC val pha 1 cao nhất giữa hai nửa (hoà -> nửa đầu = lr nhỏ hơn, như so sánh '>' của họ). Rồi --infer với lượt thắng.'''
+       (5 + 4), lr thắng = AUROC val pha 1 cao nhất giữa hai nửa (hoà -> nửa đầu = lr nhỏ hơn, như so sánh '>' của họ). Dự đoán test = lần chấm test
+       CUỐI của pha 2 trong lượt thắng (không chạy --infer riêng); cổng check_run trên MỌI lượt (hai nửa: cả hai).'''
     t0 = time.time()
     lrs = None if kind == 'lin' else PAPER_GLORI_LRS
     log(f"== {kind}: hoc bang ma cua ho ({'luoi mac dinh 13 lr' if lrs is None else 'luoi 9 lr cua bai'}, lo {BATCH}, anh {IMAGE_SIZE}, 10 + 10 epoch)")
@@ -328,38 +382,40 @@ def run_head(kind, repo, package_dir, csv_root, checkpoint, config, out_root, lo
                 for i, half in enumerate(GLORI_HALVES)]
     for r in runs:
         assert r['chay']['ma_thoat'] == 0, f"hoc {kind} ({r['thu_muc']}) THAT BAI:\n{r['chay']['duoi_log']}"
+    checks = [check_run(r, csv_root) for r in runs]
+    for r, c in zip(runs, checks):
+        assert c['val']['dat'] and c['test']['dat'], (f"{r['thu_muc']}: cong lan cham KHONG dat (val {c['val']}, test {c['test']}) -> DUNG, gui Claude")
     choices = [phase1_choice(r['ket_qua']) for r in runs]
     k = max(range(len(runs)), key=lambda i: (choices[i]['auroc_val'], -i))
     winner = runs[k]
     test_blocks = [b for b in winner['ket_qua'] if b['tach'] == 'test']
-    inf = infer(kind, repo, package_dir, csv_root, checkpoint, config, winner['thu_muc'], os.path.join(out_root, f'{kind}_infer'), log=log)
-    return dict(loai=kind, luot=[dict(thu_muc=r['thu_muc'], lrs=r['lrs'], phut=r['chay']['phut'], chon=c) for r, c in zip(runs, choices)],
-                thang=k, chon=choices[k], hai_nua=len(runs) > 1, test_ho_ghi_cuoi_pha2=(test_blocks[-1] if test_blocks else None), infer=inf,
-                phut_tong=(time.time() - t0) / 60)
+    pred_path = _write_test_predictions(winner['thu_muc'], checks[k]['du_doan_test'])
+    return dict(loai=kind, luot=[dict(thu_muc=r['thu_muc'], lrs=r['lrs'], phut=r['chay']['phut'], chon=c, cong={s: x[s] for s in ('val', 'test')})
+                                 for r, c, x in zip(runs, choices, checks)],
+                thang=k, chon=choices[k], hai_nua=len(runs) > 1, test_ho_ghi_cuoi_pha2=(test_blocks[-1] if test_blocks else None),
+                cong={s: checks[k][s] for s in ('val', 'test')}, du_doan=pred_path, phut_tong=(time.time() - t0) / 60)
 
 
 SMOKE_SIZES = dict(train=512, val=256, test=256)     # lượt chạy thử: n ảnh đầu mỗi tách
 
 
 def smoke_test(repo, package_dir, csv_root, checkpoint, config, out_root, log=print):
-    '''Chạy thử nhỏ bằng mã của họ (~5 phút): Linear 1 lr trên bộ CSV nhỏ (SMOKE_SIZES ảnh đầu mỗi tách), 1 + 1 epoch, rồi --infer -> bắt lỗi môi
-       trường / tệp chạy / đọc kết quả / lưu dự đoán TRƯỚC lượt đầy đủ. Số đo ở đây vô nghĩa (không đọc). Không dùng --num-samples (lỗi của họ với
-       torch mới, xem vindr_dataset.write_subset_csvs).'''
-    import numpy as np
-
+    '''Chạy thử nhỏ bằng mã của họ (~5 phút): Linear 2 lr trên bộ CSV nhỏ (SMOKE_SIZES ảnh đầu mỗi tách), 1 + 1 epoch -> bắt lỗi môi trường / tệp
+       chạy / đọc kết quả / ghi lần chấm / hai cổng check_run TRƯỚC lượt đầy đủ. Số đo ở đây vô nghĩa (không đọc). Không dùng --num-samples (lỗi
+       của họ với torch mới, xem vindr_dataset.write_subset_csvs).'''
     from .vindr_dataset import write_subset_csvs
     small = os.path.join(out_root, 'csv_nho')
     if not os.path.isabs(csv_root): small = os.path.relpath(small)      # giữ kiểu đường dẫn của csv_root (bản kiểm Windows: tương đối)
     sizes = write_subset_csvs(csv_root, small, SMOKE_SIZES)
-    r = train_once('lin', repo, package_dir, small, checkpoint, config, os.path.join(out_root, 'thu_hoc'), lrs=(1e-3,),
+    r = train_once('lin', repo, package_dir, small, checkpoint, config, os.path.join(out_root, 'thu_hoc'), lrs=(1e-4, 1e-3),
                    extra=('--epochs', 1, '--val-epochs', 1, '--eval-period-epochs', 1, '--save-checkpoint-frequency', 1), log=log)
     assert r['chay']['ma_thoat'] == 0, f"chay thu (hoc) THAT BAI:\n{r['chay']['duoi_log']}"
-    inf = infer('lin', repo, package_dir, small, checkpoint, config, r['thu_muc'], os.path.join(out_root, 'thu_infer'), log=log)
-    with np.load(inf['du_doan']) as z:
-        shape, target = z['preds'].shape, z['target']
-    ok = (shape == (sizes['test'], len(sizes['class_names'])) and {b['tach'] for b in r['ket_qua']} >= {'val', 'test'}
+    c = check_run(r, small)
+    preds, target = c['du_doan_test']
+    ok = (preds.shape == (sizes['test'], len(sizes['class_names'])) and c['val']['dat'] and c['test']['dat'] and c['val']['so_dau'] == 2
           and int(target.sum()) > 0)
-    return dict(dat=bool(ok), hinh_du_doan=list(shape), khoi=[(b['buoc'], b['tach']) for b in r['ket_qua']], phut=r['chay']['phut'] + inf['chay']['phut'])
+    return dict(dat=bool(ok), hinh_du_doan=list(preds.shape), khoi=[(b['buoc'], b['tach']) for b in r['ket_qua']], phut=r['chay']['phut'],
+                cong={s: c[s] for s in ('val', 'test')})
 
 
 # ---- lưu / khôi phục từng loại đầu qua tệp resume của khối ghi cuối (ghi() chỉ local; dong_bo() tải lên MỘT lượt cuối; tệp resume ghi đè) ----
@@ -390,15 +446,15 @@ def _write_json(path, obj):
 
 
 def save_head(result, kind, t, out_root, ghi):
-    '''Kết quả một loại đầu -> 3 tệp qua ghi() (local + hàng chờ): dự đoán test (.npz của --infer), kết quả (JSON; du_doan = tên tệp), nhật ký của
-       họ (log, results_eval_linear.json, config.yaml của mọi thư mục lượt chạy loại đầu này; KHÔNG .pth). result['infer']['du_doan'] trỏ sang bản
-       local vừa ghi. -> [tên tệp] (thứ tự HEAD_FILES).'''
+    '''Kết quả một loại đầu -> 3 tệp qua ghi() (local + hàng chờ): dự đoán test (lần chấm test cuối của pha 2), kết quả (JSON; du_doan = tên tệp),
+       nhật ký của họ (log, results_eval_linear.json, config.yaml, mọi lần chấm đã ghi (cham/) của mọi thư mục lượt chạy loại đầu này; KHÔNG .pth).
+       result['du_doan'] trỏ sang bản local vừa ghi. -> [tên tệp] (thứ tự HEAD_FILES).'''
     names = [f.format(kind=kind, t=t) for f in HEAD_FILES]
-    with open(result['infer']['du_doan'], 'rb') as f:
+    with open(result['du_doan'], 'rb') as f:
         pred_bytes = f.read()
-    result['infer']['du_doan'] = ghi(names[0], lambda q: _write_bytes(q, pred_bytes))
+    result['du_doan'] = ghi(names[0], lambda q: _write_bytes(q, pred_bytes))
     js = json.loads(json.dumps(result))
-    js['infer']['du_doan'] = names[0]
+    js['du_doan'] = names[0]
     ghi(names[1], lambda q: _write_json(q, js))
     dirs = sorted(d for d in os.listdir(out_root) if d.startswith(f'{kind}_') and os.path.isdir(os.path.join(out_root, d)))
 
@@ -415,8 +471,8 @@ def restore_head(names, local_dir):
     import numpy as np
     with open(os.path.join(local_dir, names[1]), encoding='utf-8') as f:
         result = json.load(f)
-    result['infer']['du_doan'] = os.path.join(local_dir, names[0])
-    with np.load(result['infer']['du_doan']) as z:
+    result['du_doan'] = os.path.join(local_dir, names[0])
+    with np.load(result['du_doan']) as z:
         assert z['preds'].ndim == 2 and z['preds'].shape == z['target'].shape and np.isfinite(z['preds']).all(), f'{names[0]}: du doan hong -> DUNG'
     result['khoi_phuc'] = True
     return result
@@ -435,8 +491,10 @@ def head_step(kind, state, repo, package_dir, csv_root, checkpoint, config, out_
 
 def head_summary(result):
     '''Một dòng mô tả lượt của một loại đầu (KHÔNG có số test — số test ở ô chấm).'''
-    c = result['chon']
+    c, g = result['chon'], result['cong']
     when = 'KHOI PHUC tu tep resume' if result.get('khoi_phuc') else f"{result['phut_tong']:.0f} phut"
     return (f"{result['loai']}: lr chon {c['lr']:g} (AUROC val pha 1 {c['auroc_val']:.4f}, dropout bat)"
             + (' | 2 nua luoi (9 lr cung luc tran bo nho)' if result['hai_nua'] else '') + ' | luot: '
-            + ', '.join(f"{os.path.basename(x['thu_muc'])} {x['phut']:.0f} phut" for x in result['luot']) + f' | {when} | so test: o C8')
+            + ', '.join(f"{os.path.basename(x['thu_muc'])} {x['phut']:.0f} phut" for x in result['luot'])
+            + f" | cong lan cham: val {g['val']['so_dau']} lr, AUROC tinh lai - ho tinh lech max {g['val']['lech_max']:.1e}, lr ho chon "
+            + ('dung luat' if g['val']['chon_dung_luat'] else 'SAI luat') + f"; test lech {g['test']['lech_max']:.1e} | {when} | so test: o C8")

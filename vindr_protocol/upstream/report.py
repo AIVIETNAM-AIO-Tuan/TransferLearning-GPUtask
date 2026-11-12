@@ -1,9 +1,11 @@
 """Chấm 86e (PLAN_86 §12.5) — CHỈ MÔ TẢ, không chọn gì theo test.
 
-Dự đoán test của mã họ (--infer; xác suất sigmoid của họ) -> macro AP / AUROC 28 cột bằng torchmetrics 0.10.3 (đúng lớp + average='macro' như build_metric
-của họ; cổng: trùng số họ in ở --infer), TB + CI95 của 1.000 lần bootstrap theo ảnh (họ không công bố mã bootstrap: rút ảnh có hoàn lại, hạt 8603 — cùng
-dãy rút với ô C5 của 86b), kèm AP / AUROC 27 lớp, AUPRC hình thang, mAP 21 (hàm của gói). Đặt cạnh Bảng IV và nhánh sát bài E = 10 của 86b (cùng dữ liệu,
-cùng lần rút -> hiệu ghép cặp mã họ − mã ta). Cổng chéo: số của hàng 86b tính bằng torchmetrics ở đây phải trùng số ô C5 của 86b (tính bằng hàm của gói)."""
+Dự đoán test của mã họ = lần chấm test CUỐI của pha 2 trong lượt học (xác suất sigmoid của họ, chép đúng như vừa vào torchmetrics; Tuấn 12/11: không
+chạy --infer riêng) -> macro AP / AUROC 28 cột bằng torchmetrics 0.10.3 (đúng lớp + average='macro' như build_metric của họ; cổng: AUROC tính lại = số họ
+tính ở chính lần chấm đó — mã họ chỉ tính AUROC lúc chấm (multilabel_auroc mặc định), nên AP không có số đối chiếu), TB + CI95 của 1.000 lần bootstrap
+theo ảnh (họ không công bố mã bootstrap: rút ảnh có hoàn lại, hạt 8603 — cùng dãy rút với ô C5 của 86b), kèm AP / AUROC 27 lớp, AUPRC hình thang, mAP 21
+(hàm của gói). Đặt cạnh Bảng IV và nhánh sát bài E = 10 của 86b (cùng dữ liệu, cùng lần rút -> hiệu ghép cặp mã họ − mã ta). Cổng chéo: số của hàng 86b
+tính bằng torchmetrics ở đây phải trùng số ô C5 của 86b (tính bằng hàm của gói)."""
 import json
 import warnings
 
@@ -85,17 +87,17 @@ def run(results, vindr, kiem_ke, tai, xung_dot, n_boot=N_BOOT, seed=BOOT_SEED, l
     out = dict(n_boot=n_boot, hat=seed, bang_iv=PAPER_TABLE_IV, nguon_86b=src_86b, hang={}, hieu={}, ket_luan={}, cong={})
     for t in HEADS:
         r = results[t]
-        with np.load(r['infer']['du_doan']) as z:
+        with np.load(r['du_doan']) as z:
             preds, tgt = z['preds'].astype(np.float64), z['target'].astype(np.int64)
-        assert preds.shape == target.shape and np.array_equal(tgt, target), f'{t}: target --infer KHAC nhan test (thu tu CSV) -> DUNG'
+        assert preds.shape == target.shape and np.array_equal(tgt, target), f'{t}: target lan cham test KHAC nhan test (thu tu CSV) -> DUNG'
         row_up, boot_up = score_row(preds, target, main_idx, boot_idx)
         row_86b, boot_86b = score_row(ours_86b[t]['probs'], target, main_idx, boot_idx)
-        printed = r['infer']['chi_so_ho_in']
+        printed = r['test_ho_ghi_cuoi_pha2']['ket_qua']['auroc']             # = số họ tính ở lần chấm test cuối (cổng check_run của runner)
         c5 = ours_86b[t]['c5']
         lech_c5 = max(abs(row_86b[k] - c5[k]) for k in ('ap28', 'auroc28', 'ap28_tb', 'auroc28_tb'))
-        out['cong'][t] = dict(ap_ho_in=printed['ap'], auroc_ho_in=printed['auroc'], ap_tinh_lai=row_up['ap28'], auroc_tinh_lai=row_up['auroc28'],
-                              trung=bool(abs(printed['ap'] - row_up['ap28']) < 5e-5 and abs(printed['auroc'] - row_up['auroc28']) < 5e-5),
-                              lech_86b_c5=float(lech_c5), trung_86b_c5=bool(lech_c5 < 1e-4))
+        out['cong'][t] = dict(auroc_ho_tinh=float(printed), auroc_tinh_lai=row_up['auroc28'], ap_tinh_lai=row_up['ap28'],
+                              trung=bool(abs(printed - row_up['auroc28']) < 5e-5 and r['cong']['test']['dat'] and r['cong']['val']['dat']),
+                              cong_val=r['cong']['val'], lech_86b_c5=float(lech_c5), trung_86b_c5=bool(lech_c5 < 1e-4))
         d = boot_up - boot_86b
         ci = lambda v: [float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))]
         out['hang'][t] = dict(ma_goc=dict(**row_up, lr=r['chon']['lr'], auroc_val=r['chon']['auroc_val'], hai_nua=r['hai_nua']),
@@ -117,9 +119,12 @@ def _print(out, log):
         f"0.10.3; TB + CI95 = {out['n_boot']} lan rut anh (hat {out['hat']}); CHI MO TA ===")
     for t in HEADS:
         h, p, c = out['hang'][t], PAPER_TABLE_IV[t], out['cong'][t]
-        log(f"\n--- {HEAD_TEXT[t]} --- cong: so ho in o --infer AP {c['ap_ho_in']:.4f} / AUROC {c['auroc_ho_in']:.4f} | tinh lai {c['ap_tinh_lai']:.4f} / "
-            f"{c['auroc_tinh_lai']:.4f} -> {'TRUNG' if c['trung'] else '⚠ LECH'} | hang 86b tinh bang torchmetrics - o C5 86b (ham cua goi): lech max "
-            f"{c['lech_86b_c5']:.1e} -> {'TRUNG' if c['trung_86b_c5'] else '⚠ LECH'}")
+        cv = c['cong_val']
+        log(f"\n--- {HEAD_TEXT[t]} --- cong: AUROC test ho tinh o lan cham cuoi pha 2 {c['auroc_ho_tinh']:.4f} | tinh lai tu du doan da chep "
+            f"{c['auroc_tinh_lai']:.4f} -> {'TRUNG' if c['trung'] else '⚠ LECH'} (AP: ma ho khong tinh luc cham -> chi so tinh lai) | val cuoi pha 1: "
+            f"{cv['so_dau']} lr, AUROC tinh lai - ho tinh lech max {cv['lech_max']:.1e}, lr ho chon {'DUNG' if cv['chon_dung_luat'] else '⚠ SAI'} luat "
+            f"AUROC lon nhat{'' if cv['chon_trung_tinh_lai'] else ' (⚠ khac lr lon nhat theo so tinh lai — gan hoa)'} | hang 86b tinh bang torchmetrics - "
+            f"o C5 86b (ham cua goi): lech max {c['lech_86b_c5']:.1e} -> {'TRUNG' if c['trung_86b_c5'] else '⚠ LECH'}")
         log(f"{'hang (dieu kien)':<78}{'AP28':>7}{'AP28 TB [CI95]':>24}{'AUROC28':>9}{'AUROC28 TB [CI95]':>24}{'AP27':>7}{'AUROC27':>9}{'AUPRC27':>9}{'mAP21':>7}")
         log(f"{'BAI Bang IV':<78}{'':>7}{fm(p['ap']) + ' ' + fci(p['ap_ci']):>24}{'':>9}{fm(p['auroc']) + ' ' + fci(p['auroc_ci']):>24}")
         for key, text in (('ma_goc', f"MA GOC linear_glori.py, lr {h['ma_goc']['lr']:g} (val AUROC {h['ma_goc']['auroc_val']:.4f}, dropout bat)"
