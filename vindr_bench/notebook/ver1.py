@@ -31,7 +31,9 @@ PAPER_HEAD = {'lin4': 'Linear', 'glori': 'GLoRI'}               # cột Bảng I
 
 
 def run_tag(encoder):
-    return f'r89v1_{encoder}'
+    '''_k64 (0.2.1, Tuấn 13/11 "chạy theo khúc cho đồng bộ"): mọi lượt Ver1 tính backbone theo khúc 64 ảnh. Lượt cũ r89v1_raddino (OOM ở Linear-4) và
+       r89v1_biomedclip (không chia khúc) giữ trên Drive làm hồ sơ.'''
+    return f'r89v1_{encoder}_k64'
 
 
 def drive_api(ns):
@@ -101,10 +103,14 @@ def smoke(ctx, log=print):
         return ctx['thu']
     thu = R.smoke_test(ctx['run'], log=log)
     for k, v in thu.items():
-        log(f"chay thu {R.HEADS[k]['title']:10s}: {'DAT' if v['dat'] else 'TRUOT'} | du doan {v['hinh_du_doan']} | {v['phut']:.1f} phut | lech tinh lai val "
+        m = v['bo_nho'] or {}
+        log(f"chay thu {R.HEADS[k]['title']:10s}: {'DAT' if v['dat'] else 'TRUOT'} | {v['so_dau']} dau | GPU dinh "
+            f"{m.get('dinh_cap_phat_gib', float('nan')):.1f} / {m.get('tong_gib', float('nan')):.1f} GiB (nguong {R.MEM_LIMIT:.0%}: "
+            f"{'DAT' if v['bo_nho_dat'] else 'TRUOT'}) | du doan {v['hinh_du_doan']} | {v['phut']:.1f} phut | lech tinh lai val "
             f"{v['cong']['val']['lech_max']:.1e} / test {v['cong']['test']['lech_max']:.1e} | tien trinh hoc: "
-            + ('ML-Decoder ' + str([m['so_dau'] for m in v['kiem_tien_trinh']['mldecoder']]) + ' dau' if k == 'mldec' else 'nap trong so dat'))
-    assert all(v['dat'] for v in thu.values()), f'chay thu TRUOT: {[k for k, v in thu.items() if not v["dat"]]} -> DUNG, gui Claude output C5'
+            + ('ML-Decoder ' + str([x['so_dau'] for x in v['kiem_tien_trinh']['mldecoder']]) + ' dau' if k == 'mldec' else 'nap trong so dat'))
+    assert all(v['dat'] for v in thu.values()), (f'chay thu TRUOT: {[k for k, v in thu.items() if not v["dat"]]} (bo nho GPU / cong) -> DUNG truoc luot '
+                                                 'day du, gui Claude output C5')
     ctx['thu'] = thu
     return thu
 

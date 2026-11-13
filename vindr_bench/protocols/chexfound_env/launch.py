@@ -8,6 +8,7 @@ Không sửa tệp nào của họ: các hàm được tra theo tên trong modul
      tính -> <output-dir>/cham/<thứ tự>_<tách>_iter<k>.npz + .json (phép tính, thứ tự gọi, chế độ train / eval của đầu, RNG không đổi);
   3. (biến VB_ENCODER) thay mô hình CheXFound bằng lớp bọc vindr_bench.encoders trong setup_and_build_model — vẫn setup(args) + autocast theo config
      của họ; kết quả kiểm nạp trọng số của CHÍNH tiến trình học -> <output-dir>/nap_encoder.json, trượt -> dừng;
+  5. (0.2.1) sau main() của họ: bộ nhớ GPU đỉnh (cấp phát / giữ) của chính tiến trình -> <output-dir>/bo_nho_gpu.json (cổng bộ nhớ ở lượt chạy thử).
   4. (biến VB_HEAD=mldecoder; chỉ với --glori --n-last-blocks 1, không --cat-cls) thay setup_glori bằng heads.mldecoder.setup_mldecoder; mỗi lần dựng
      đầu (pha 1, pha 2) ghi một bản ghi vào <output-dir>/dau_mldecoder.json (số đầu, chiều vào, số tham số) — runner kiểm.
 Chép từ vindr_protocol/upstream/launch.py @ 0.8.2 (mục 1–3); mục 4 mới ở 89. Chỉ cú pháp / API có ở Python 3.9 + torch 2.0."""
@@ -18,11 +19,26 @@ import sys
 EVAL_DIR = 'cham'
 NAP_FILE = 'nap_encoder.json'
 MLDEC_FILE = 'dau_mldecoder.json'
+MEM_FILE = 'bo_nho_gpu.json'      # 0.2.1: bộ nhớ GPU đỉnh của CHÍNH tiến trình học (cả hai pha) — cổng bộ nhớ ở lượt chạy thử
 ENCODER_ENV, HEAD_ENV = 'VB_ENCODER', 'VB_HEAD'
 
 
 def _rank0():
     return int(os.environ.get('RANK', '0')) == 0
+
+
+def write_memory(out_dir):
+    '''Ghi bộ nhớ GPU đỉnh (cấp phát + giữ) của tiến trình này vào out_dir/MEM_FILE (rank 0). Không có GPU -> không ghi, trả None.'''
+    import torch
+    if not torch.cuda.is_available() or not _rank0():
+        return None
+    p = torch.cuda.get_device_properties(0)
+    rec = dict(gpu=p.name, tong_gib=p.total_memory / 2 ** 30, dinh_cap_phat_gib=torch.cuda.max_memory_allocated() / 2 ** 30,
+               dinh_giu_gib=torch.cuda.max_memory_reserved() / 2 ** 30)
+    with open(os.path.join(out_dir, MEM_FILE), 'w', encoding='utf-8') as f:
+        json.dump(rec, f)
+    print('BO_NHO_GPU ' + json.dumps(rec), flush=True)
+    return rec
 
 
 def register_vindr():
@@ -150,7 +166,9 @@ def main(argv=None):
     if os.environ.get(ENCODER_ENV):
         inject_encoder(linear_glori, os.environ[ENCODER_ENV])
     record_evaluations(linear_glori, os.path.join(args.output_dir, EVAL_DIR))
-    return linear_glori.main(args)
+    rc = linear_glori.main(args)
+    write_memory(args.output_dir)
+    return rc
 
 
 if __name__ == '__main__':

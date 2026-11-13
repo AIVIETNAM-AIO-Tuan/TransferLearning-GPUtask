@@ -14,4 +14,4 @@ Module 86 (`vindr_protocol`) giữ nguyên làm hồ sơ các notebook đã ch�
 
 Gói không chứa ID Drive, không chứa dữ liệu. Phần chạy trong tiến trình của họ (encoders, heads, protocols/chexfound_env/{launch, dataset,
 probe_features}) chỉ dùng cú pháp / API có ở Python 3.9 + torch 2.0."""
-__version__ = '0.2.0'
+__version__ = '0.2.1'          # 0.2.1 (13/11): backbone theo khúc 64 ảnh (encoders/base.py) + cổng bộ nhớ GPU ở lượt chạy thử — sau OOM của 89v1_raddino

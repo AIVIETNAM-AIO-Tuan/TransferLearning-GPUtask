@@ -27,6 +27,11 @@ from .environment import TheirEnv, child_env
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAUNCH = os.path.join(HERE, 'launch.py')
 EVAL_DIR, NAP_FILE, MLDEC_FILE = 'cham', 'nap_encoder.json', 'dau_mldecoder.json'     # = launch.py (không import launch ở đây: cần chexfound)
+MEM_FILE = 'bo_nho_gpu.json'                                                             # = launch.MEM_FILE
+# Cổng bộ nhớ của lượt chạy thử (0.2.1): đỉnh cấp phát <= 70 % bộ nhớ GPU. Hiệu chỉnh bằng số đo 13/11 (RAD-DINO 518, lô 256, không chia khúc):
+# Linear-1 đỉnh 61,6 / 79,25 GiB (78 %) — qua sát trần; Linear-4 64,6 GiB (82 %) — OOM sau lần chấm val đầu (phân mảnh). Ước sau chia khúc 64:
+# Linear ~18–24 GiB, ML-Decoder 5 đầu ~19 GiB, GLoRI 5 đầu ~47 GiB (tools/memory_estimate.py).
+MEM_LIMIT = 0.70
 RESULTS_FILE = 'results_eval_linear.json'
 OPTS = ('student.block_chunks=4',)            # như 86f / 86j (config.yaml của CheXFound phát hành ghi 0; với lớp bọc không ảnh hưởng mô hình)
 BATCH = 256
@@ -41,7 +46,6 @@ HEADS = {
 HEAD_ORDER = ('lin1', 'lin4', 'mldec', 'glori')
 CHECK_TOL = 5e-5                              # |AUROC tính lại (CPU) − số họ tính (GPU)| từ CÙNG preds
 SMOKE_SIZES = dict(train=512, val=256, test=256)
-SMOKE_LRS = (1e-4, 1e-3)
 _OOM = ('CUDA out of memory', 'OutOfMemoryError', 'CUBLAS_STATUS_ALLOC_FAILED')
 _HEX32 = re.compile(r'(?<![0-9A-Za-z])[0-9a-f]{32}(?![0-9A-Za-z])')
 
@@ -212,7 +216,7 @@ def process_checks(r, kind, lrs):
         if not ok: why.append(f'ML-Decoder: ban ghi dung dau {ml!r:.300} KHAC (pha 1 du luoi, pha 2 mot dau)')
     elif ml is not None:
         why.append(f'{kind}: co ban ghi ML-Decoder (khong duoc tiem) -> sai loai dau')
-    return dict(dat=not why, nap=nap, mldecoder=ml, ly_do=why)
+    return dict(dat=not why, nap=nap, mldecoder=ml, ly_do=why, bo_nho=_read_json(os.path.join(r['thu_muc'], MEM_FILE)))
 
 
 _RUN_DIR_PREFIXES = tuple(f'{k}_' for k in HEADS) + ('thu_',)
@@ -295,22 +299,36 @@ def run_head(run, kind, log=print):
                 cong={s: checks[k][s] for s in ('val', 'test')}, du_doan=pred_path, phut_tong=(time.time() - t0) / 60)
 
 
+def smoke_lrs(kind):
+    '''Lưới của lượt chạy thử = nhóm đầu LỚN NHẤT của lượt thật (Linear: 9 lr; GLoRI / ML-Decoder: nửa đầu 5 lr) -> bộ nhớ đầu đọc như lượt thật.'''
+    return HALVES[0] if HEADS[kind]['halves'] else PAPER_LRS
+
+
+def memory_ok(mem, limit=MEM_LIMIT):
+    '''Cổng bộ nhớ (0.2.1): đỉnh cấp phát của tiến trình học <= limit × bộ nhớ GPU. Không có số đo -> KHÔNG đạt.'''
+    return bool(mem) and mem['dinh_cap_phat_gib'] <= limit * mem['tong_gib']
+
+
 def smoke_test(run, kinds=HEAD_ORDER, log=print):
-    '''Chạy thử nhỏ mỗi loại đầu (số đo VÔ NGHĨA): 2 lr, SMOKE_SIZES ảnh đầu mỗi tách, 1 + 1 epoch -> bắt lỗi môi trường / tiêm / đọc kết quả / ghi lần
-       chấm / mọi cổng TRƯỚC lượt đầy đủ. -> {loại: dict(dat, ...)}.'''
+    '''Chạy thử nhỏ mỗi loại đầu (số đo VÔ NGHĨA): lưới = nhóm đầu lớn nhất của lượt thật (smoke_lrs), lô 256 như lượt thật, SMOKE_SIZES ảnh đầu mỗi
+       tách, 1 + 1 epoch -> bắt lỗi môi trường / tiêm / đọc kết quả / ghi lần chấm / mọi cổng + CỔNG BỘ NHỚ (đỉnh <= MEM_LIMIT bộ nhớ GPU) TRƯỚC lượt
+       đầy đủ. -> {loại: dict(dat, bo_nho, ...)}.'''
     small = os.path.join(run.out_root, 'csv_nho')
     sizes = D.write_subset_csvs(run.csv_root, small, SMOKE_SIZES)
     out = {}
     for kind in kinds:
-        r = train_once(run, kind, os.path.join(run.out_root, f'thu_{kind}'), SMOKE_LRS, csv_root=small,
+        lrs = smoke_lrs(kind)
+        r = train_once(run, kind, os.path.join(run.out_root, f'thu_{kind}'), lrs, csv_root=small,
                        extra=('--epochs', 1, '--val-epochs', 1, '--eval-period-epochs', 1, '--save-checkpoint-frequency', 1), log=log)
         _assert_run(r, kind)
-        c = check_run(r, small, kind, SMOKE_LRS)
+        c = check_run(r, small, kind, lrs)
         preds, target = c['du_doan_test']
-        ok = (preds.shape == (sizes['test'], len(sizes['class_names'])) and c['val']['dat'] and c['test']['dat'] and c['val']['so_dau'] == len(SMOKE_LRS)
-              and int(target.sum()) > 0)
-        out[kind] = dict(dat=bool(ok), hinh_du_doan=list(preds.shape), khoi=[(b['buoc'], b['tach']) for b in r['ket_qua']], phut=r['chay']['phut'],
-                         cong={s: c[s] for s in ('val', 'test')}, kiem_tien_trinh=r['kiem_tien_trinh'])
+        mem = r['kiem_tien_trinh']['bo_nho']
+        ok = (preds.shape == (sizes['test'], len(sizes['class_names'])) and c['val']['dat'] and c['test']['dat'] and c['val']['so_dau'] == len(lrs)
+              and int(target.sum()) > 0 and memory_ok(mem))
+        out[kind] = dict(dat=bool(ok), bo_nho=mem, bo_nho_dat=memory_ok(mem), so_dau=len(lrs), hinh_du_doan=list(preds.shape),
+                         khoi=[(b['buoc'], b['tach']) for b in r['ket_qua']], phut=r['chay']['phut'], cong={s: c[s] for s in ('val', 'test')},
+                         kiem_tien_trinh=r['kiem_tien_trinh'])
     return out
 
 
@@ -389,8 +407,11 @@ def head_summary(result):
     '''Một dòng mô tả lượt của một loại đầu (KHÔNG có số test — số test ở ô chấm).'''
     c, g = result['chon'], result['cong']
     when = 'KHOI PHUC tu tep resume' if result.get('khoi_phuc') else f"{result['phut_tong']:.0f} phut"
-    return (f"{result['ten_dau']}: anh {result['anh']} | lr chon {c['lr']:g} (AUROC val pha 1 {c['auroc_val']:.4f}, dropout bat)"
-            + (' | 2 nua luoi 5 + 4' if result['hai_nua'] else '') + ' | luot: '
+    mems = [x['kiem_tien_trinh'].get('bo_nho') for x in result['luot'] if (x.get('kiem_tien_trinh') or {}).get('bo_nho')]
+    mem = (f" | GPU dinh {max(m['dinh_cap_phat_gib'] for m in mems):.1f} / {mems[0]['tong_gib']:.1f} GiB" if mems else '')
+    edge = ' | lr O BIEN LUOI (PLAN_89 7.5)' if c['lr'] in (min(PAPER_LRS), max(PAPER_LRS)) else ''
+    return (f"{result['ten_dau']}: anh {result['anh']} | lr chon {c['lr']:g}{edge} (AUROC val pha 1 {c['auroc_val']:.4f}, dropout bat)"
+            + (' | 2 nua luoi 5 + 4' if result['hai_nua'] else '') + mem + ' | luot: '
             + ', '.join(f"{os.path.basename(x['thu_muc'])} {x['phut']:.0f} phut" for x in result['luot'])
             + f" | cong lan cham: val {g['val']['so_dau']} lr, lech tinh lai {g['val']['lech_max']:.1e}, lr ho chon "
             + ('dung luat' if g['val']['chon_dung_luat'] else 'SAI luat') + f"; test lech {g['test']['lech_max']:.1e} | {when} | so test: o C7")
