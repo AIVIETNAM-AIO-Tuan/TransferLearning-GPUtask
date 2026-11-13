@@ -119,17 +119,24 @@ def _strs(x):
 
 class RadDinoHF(nn.Module):
     '''RAD-DINO (HF Dinov2Model). norm_last: n tầng cuối qua layernorm cuối; renorm: ImageNet -> thống kê RAD-DINO trước mô hình.
-       Thuộc tính `nap` = kết quả kiểm nạp trọng số (xem đầu tệp); build() quyết đạt / dừng.'''
+       attn: None = attention mặc định của bản transformers; 'eager' = ép attention tường minh (§16.4 13/11 lần 2: nền ở môi trường mới phải cùng
+       thuật toán với transformers 4.36.2 của họ — bản đó chỉ có eager cho Dinov2; 5.x mặc định SDPA). Môi trường của họ: luôn None.
+       Thuộc tính `nap` = kết quả kiểm nạp trọng số (xem đầu tệp) + attention thực dùng; build() quyết đạt / dừng.'''
 
-    def __init__(self, norm_last, renorm, revision=RADDINO_REV):
+    def __init__(self, norm_last, renorm, revision=RADDINO_REV, attn=None):
         super().__init__()
         import transformers
         from huggingface_hub import hf_hub_download
         from safetensors.torch import load_file
-        self.model, info = transformers.AutoModel.from_pretrained(RADDINO_ID, revision=revision, output_loading_info=True)
+        kw = dict(revision=revision, output_loading_info=True)
+        if attn:
+            kw['attn_implementation'] = attn
+        self.model, info = transformers.AutoModel.from_pretrained(RADDINO_ID, **kw)
+        used = getattr(self.model.config, '_attn_implementation', None)
+        assert not attn or used == attn, f'RAD-DINO: attention {used!r} != yeu cau {attn!r} -> DUNG'
         path = hf_hub_download(RADDINO_ID, RADDINO_FILE, revision=revision)
         self.nap = dict(nguon=f'{RADDINO_ID}@{revision}', tep=RADDINO_FILE, ban_tep=_snapshot(path), thu_vien=f'transformers {transformers.__version__}',
-                        kieu_mo_hinh=str(next(self.model.parameters()).dtype),
+                        kieu_mo_hinh=str(next(self.model.parameters()).dtype), attention=used,
                         thong_tin_nap=dict(thieu=_strs(info.get('missing_keys')), thua=_strs(info.get('unexpected_keys')),
                                            sai_hinh=_strs(info.get('mismatched_keys')), loi=_strs(info.get('error_msgs'))),
                         so_voi_tep=compare_to_file(self.model.state_dict(), load_file(path)))
@@ -168,19 +175,30 @@ def _biomedclip_loading(m):
                 kieu_mo_hinh=str(next(m.model.parameters()).dtype), thong_tin_nap=None, so_voi_tep=compare_to_file(m.model.state_dict(), sd, prefix='visual.'))
 
 
-def build(name, check=True):
-    '''-> lớp bọc ở chế độ eval (CPU; tệp chạy chuyển .cuda()), thuộc tính `nap` = kết quả kiểm nạp trọng số THẬT + nap['dat'] (loading_ok).
-       check=True: trượt -> AssertionError (dừng tiến trình). check=False: trả mô hình kèm nap['dat'] = False để bên gọi ghi lại rồi dừng.
-       biomedclip_ho cần repo CheXFound trên sys.path (import lớp bọc của họ).'''
+def _timm_attention():
+    try:
+        import timm.layers
+        return f'timm {timm.__version__}: fused_attn (SDPA) = {bool(timm.layers.use_fused_attn())}'
+    except Exception as e:                                  # chỉ để ghi lại; không ảnh hưởng mô hình
+        return f'khong ro ({type(e).__name__})'
+
+
+def build(name, check=True, attn=None):
+    '''-> lớp bọc ở chế độ eval (CPU; tệp chạy chuyển .cuda()), thuộc tính `nap` = kết quả kiểm nạp trọng số THẬT + nap['dat'] (loading_ok)
+       + nap['attention'] (attention thực dùng). check=True: trượt -> AssertionError (dừng tiến trình). check=False: trả mô hình kèm nap['dat'] =
+       False để bên gọi ghi lại rồi dừng. attn (chỉ RAD-DINO, chỉ môi trường mới — nền §16.4): 'eager' ép attention tường minh; BiomedCLIP không chọn
+       được (open_clip / timm) -> attn phải None. biomedclip_ho cần repo CheXFound trên sys.path (import lớp bọc của họ).'''
     assert name in NAMES, f'encoder {name!r} khong thuoc {NAMES} -> DUNG'
     if name == 'raddino_kieu_ho':
-        m = RadDinoHF(norm_last=False, renorm=False)
+        m = RadDinoHF(norm_last=False, renorm=False, attn=attn)
     elif name == 'raddino_chuan':
-        m = RadDinoHF(norm_last=True, renorm=True)
+        m = RadDinoHF(norm_last=True, renorm=True, attn=attn)
     else:
+        assert attn is None, f'{name}: khong chon duoc attention (open_clip / timm), attn={attn!r} -> DUNG'
         from chexfound.eval.utils import BiomedCLIPBase
         m = BiomedCLIPBase()
         m.nap = _biomedclip_loading(m)
+        m.nap['attention'] = _timm_attention()
     m.nap['encoder'] = name
     m.nap['dat'] = loading_ok(m.nap)
     if check:

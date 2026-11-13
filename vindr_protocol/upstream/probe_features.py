@@ -5,11 +5,13 @@ linear_glori.py — dựng bằng HÀM CỦA HỌ (build_model_from_cfg trên co
 Không import vindr_protocol; chỉ cú pháp / API có ở Python 3.9 + torch 2.0.
 
     python probe_features.py --repo R --config C --ckpt K --input X.npy --out Y.npz --amp fp16|none [--device cuda|cpu] [--opts a=b ...]
-    python probe_features.py --repo R --encoder TEN --pkg GOI --input X.npy --out Y.npz --amp fp16|none [--device cuda|cpu]
+    python probe_features.py --repo R --encoder TEN --pkg GOI --input X.npy --out Y.npz --amp fp16|none [--device cuda|cpu] [--attn eager]
 
 --amp none: fp32 với TF32 tắt (tham chiếu). --device cpu: chỉ để kiểm trên máy (autocast cpu = bf16). --encoder (86j, PLAN_86 §16): lớp bọc
 vindr_protocol.upstream.encoders_ho thay CheXFound (cần --pkg = thư mục chứa vindr_protocol); lớp bọc không có token patch (BiomedCLIP) -> chỉ lưu cls;
-info['nap'] = kết quả kiểm nạp trọng số THẬT của encoders_ho (thông tin nạp của thư viện + so từng tensor với tệp), thieu_khoa = số khoá thiếu đo được."""
+info['nap'] = kết quả kiểm nạp trọng số THẬT của encoders_ho (thông tin nạp của thư viện + so từng tensor với tệp), thieu_khoa = số khoá thiếu đo được.
+--attn (§16.4 13/11 lần 2; chỉ RAD-DINO ở môi trường mới): ép attention của transformers (eager = thuật toán của 4.36.2) cho phép đo nền; info['attn']
+= attention thực dùng."""
 import json, sys, time, warnings
 
 
@@ -21,8 +23,10 @@ def main():
     a = sys.argv[1:]
     repo, config, ckpt, inp, out = (_arg(a, k) for k in ('--repo', '--config', '--ckpt', '--input', '--out'))
     amp, dev, encoder, pkg = _arg(a, '--amp', 'fp16'), _arg(a, '--device', 'cuda'), _arg(a, '--encoder'), _arg(a, '--pkg')
+    attn = _arg(a, '--attn')
     opts = a[a.index('--opts') + 1:] if '--opts' in a else []
     assert amp in ('fp16', 'none') and dev in ('cuda', 'cpu'), (amp, dev)
+    assert attn is None or encoder, '--attn chi dung voi --encoder'
     sys.path.insert(0, repo)
     warnings.simplefilter('ignore')
     import numpy as np
@@ -35,9 +39,9 @@ def main():
         assert pkg, '--encoder can --pkg (thu muc chua vindr_protocol)'
         sys.path.insert(0, pkg)
         from vindr_protocol.upstream import encoders_ho
-        model = encoders_ho.build(encoder, check=False)          # kiểm nạp THẬT trong tiến trình này; trượt -> ghi lại, run_features báo không đạt
+        model = encoders_ho.build(encoder, check=False, attn=attn)   # kiểm nạp THẬT trong tiến trình này; trượt -> ghi lại, run_features báo không đạt
         t = model.nap['thong_tin_nap']
-        info.update(nap=model.nap, thieu_khoa=(len(t['thieu']) if t else 0) + model.nap['so_voi_tep']['so_thieu'])
+        info.update(nap=model.nap, attn=model.nap.get('attention'), thieu_khoa=(len(t['thieu']) if t else 0) + model.nap['so_voi_tep']['so_thieu'])
     else:
         from omegaconf import OmegaConf
         from chexfound.configs import dinov2_default_config

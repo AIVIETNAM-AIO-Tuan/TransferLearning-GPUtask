@@ -6,6 +6,8 @@ không — kết luận bằng phép tính thật, không bằng thông báo h�
 - list_ptx: PTX nhúng trong thư viện GPU của môi trường (cuobjdump --list-ptx; không có công cụ -> ghi "không có").
 - make_feature_input / run_features / compare_features: đặc trưng 4 tầng cuối CheXFound bằng hàm của họ (probe_features.py), cùng đầu vào.
 - verdict: luật kết luận ĐẶT TRƯỚC (§15.2).
+- 86j (§16.4, 13/11 lần 2): relative_gate (ngưỡng theo NỀN) -> encoder_gate (fp16 vs fp32) / device_gate (GPU vs CPU); feature_stats / stats_text /
+  gate_text (phân vị, theo tầng; chỉ đọc / lưu).
 Bộ đệm JIT của driver: CUDA_CACHE_PATH = JIT_CACHE_DIR, CUDA_CACHE_MAXSIZE = 4 GiB (mọi tiến trình con dùng chung trong phiên)."""
 import glob, json, os, re, shutil, subprocess, sys, time
 
@@ -122,12 +124,14 @@ def make_feature_input(vindr, out_npy, n=FEATURE_IMAGES, size=512):
 
 
 def run_features(out_npz, repo, config, ckpt, input_npy, amp, python=None, isolated=True, device='cuda', opts=('student.block_chunks=4',),
-                 timeout_s=FEAT_TIMEOUT_S, encoder=None, pkg=None):
+                 timeout_s=FEAT_TIMEOUT_S, encoder=None, pkg=None, attn=None):
     '''probe_features.py bằng `python` -> dict(dat, info, ma_thoat, phut, duoi_loi, tep). encoder (86j): lớp bọc encoders_ho thay CheXFound (pkg =
-       thư mục chứa vindr_protocol; config / ckpt bỏ qua); dat còn đòi cổng nạp trọng số THẬT của encoders_ho (info['nap']['dat'] — 13/11).'''
+       thư mục chứa vindr_protocol; config / ckpt bỏ qua); dat còn đòi cổng nạp trọng số THẬT của encoders_ho (info['nap']['dat'] — 13/11).
+       attn (86j §16.4 13/11 lần 2; chỉ cùng encoder RAD-DINO, chỉ môi trường mới): ép attention ('eager') cho phép đo nền.'''
+    assert attn is None or encoder, 'attn chi dung voi encoder'
     cmd = [python or sys.executable, FEAT_SCRIPT, '--repo', repo, '--input', input_npy, '--out', out_npz, '--amp', amp, '--device', device]
     if encoder:
-        cmd += ['--encoder', encoder, '--pkg', pkg or os.path.dirname(os.path.dirname(HERE))]
+        cmd += ['--encoder', encoder, '--pkg', pkg or os.path.dirname(os.path.dirname(HERE))] + (['--attn', attn] if attn else [])
     else:
         cmd += ['--config', config, '--ckpt', ckpt, '--opts', *opts]
     t0 = time.time()
@@ -161,13 +165,70 @@ def compare_features(ref_npz, test_npz):
     return out
 
 
-ENCODER_GATE = dict(lech=2e-2, cos_min=0.999)        # §16.4 (sửa 13/11): lớp bọc ở môi trường cũ fp16 so fp32 CÙNG môi trường cũ (ngưỡng fp16 như §15.2)
+# 86j §16.4 (sửa 13/11 lần 2, Tuấn duyệt): ngưỡng TƯƠNG ĐỐI theo NỀN = cùng phép so ở môi trường mới (cùng lớp bọc / ảnh / GPU; RAD-DINO eager).
+# Bản trước (lệch ≤ 2e-2, cos_min ≥ 0,999 tuyệt đối, chép từ §15.2 chưa hiệu chỉnh) dừng raddino_kieu_ho ở 0,99853 trong khi nền eager = 0,99829.
+# 1 − cos ≈ góc² / 2 -> hệ số 4 trên 1 − cos = sai số gấp 2 (khớp hệ số 2 của lệch, như §15.2 (4)); lech_tran / cos_san chặn hỏng nặng.
+RELATIVE_RULE = dict(he_so_lech=2.0, cong_lech=1e-3, he_so_thieu_cos=4.0, cong_thieu_cos=1e-4, lech_tran=2e-2, cos_san=0.99)
 
 
-def encoder_gate(cmp):
-    '''86j §16.4: -> dict(dat, ...) từ compare_features(môi trường cũ fp32 = tham chiếu, môi trường cũ fp16). Cổng nạp trọng số nằm ở run_features.'''
-    return dict(dat=bool(cmp['lech_tuong_doi'] <= ENCODER_GATE['lech'] and cmp['cos_min'] >= ENCODER_GATE['cos_min']), luat=dict(ENCODER_GATE),
-                lech=cmp['lech_tuong_doi'], cos_min=cmp['cos_min'], phan=cmp['phan'])
+def relative_gate(cmp_test, cmp_floor, rule=RELATIVE_RULE):
+    '''86j §16.4: cmp_* = compare_features(tham chiếu, thử) của phép so cần kiểm và của NỀN. Đạt ⇔ lệch ≤ he_so_lech × lệch_nền + cong_lech VÀ
+       1 − cos_min ≤ he_so_thieu_cos × (1 − cos_min_nền) + cong_thieu_cos VÀ lệch ≤ lech_tran VÀ cos_min ≥ cos_san. -> dict(dat, ngưỡng, nền, luật).'''
+    lim_l = rule['he_so_lech'] * cmp_floor['lech_tuong_doi'] + rule['cong_lech']
+    lim_t = rule['he_so_thieu_cos'] * (1.0 - cmp_floor['cos_min']) + rule['cong_thieu_cos']
+    lech, cos = cmp_test['lech_tuong_doi'], cmp_test['cos_min']
+    dat = lech <= lim_l and (1.0 - cos) <= lim_t and lech <= rule['lech_tran'] and cos >= rule['cos_san']
+    return dict(dat=bool(dat), lech=lech, cos_min=cos, nguong_lech=lim_l, nguong_cos_min=1.0 - lim_t, lech_nen=cmp_floor['lech_tuong_doi'],
+                cos_min_nen=cmp_floor['cos_min'], luat=dict(rule), phan=cmp_test['phan'], phan_nen=cmp_floor['phan'])
+
+
+def encoder_gate(cmp_old, cmp_floor):
+    '''86j §16.4 cổng fp16: cmp_old = compare_features(cũ fp32, cũ fp16) — môi trường của họ, như lượt học; cmp_floor = compare_features(mới fp32,
+       mới fp16), cùng lớp bọc / ảnh / GPU (RAD-DINO eager). Cổng nạp trọng số nằm ở run_features.'''
+    assert cmp_old['phan'] == cmp_floor['phan'], (cmp_old['phan'], cmp_floor['phan'])
+    return relative_gate(cmp_old, cmp_floor)
+
+
+def device_gate(cmp_old, cmp_floor):
+    '''86j §16.4 cổng GPU–CPU: cmp_old = compare_features(cũ CPU fp32, cũ GPU fp32) — bắt lỗi GPU chung cho fp16 và fp32 (nội suy, layernorm,
+       softmax chạy fp32) mà cổng fp16 không thấy; cmp_floor = compare_features(mới CPU fp32, mới GPU fp32).'''
+    assert cmp_old['phan'] == cmp_floor['phan'], (cmp_old['phan'], cmp_floor['phan'])
+    return relative_gate(cmp_old, cmp_floor)
+
+
+def gate_text(name, g):
+    '''Một dòng tóm tắt kết quả relative_gate.'''
+    return (f"{name}: lech {g['lech']:.2e} <= {g['nguong_lech']:.2e} (nen {g['lech_nen']:.2e}) | cos_min {g['cos_min']:.6f} >= {g['nguong_cos_min']:.6f} "
+            f"(nen {g['cos_min_nen']:.6f}) | chan hong nang: lech <= {g['luat']['lech_tran']}, cos_min >= {g['luat']['cos_san']} -> "
+            f"{'DAT' if g['dat'] else 'TRUOT'}")
+
+
+def feature_stats(ref_npz, test_npz, n_worst=5):
+    '''Thống kê cos theo token cho đọc / lưu (KHÔNG phải cổng): mỗi phần (patch / cls) -> lệch (như compare_features), cos_min, phân vị cos 1e-4 /
+       1e-3 / 1e-2 / 0,5, số vector dưới 0,999, cos_min theo tầng (-n..-1), n_worst vector tệ nhất (tầng, cos, độ lớn / trung vị độ lớn cùng tầng ở
+       tham chiếu). Tầng = trục 0 của mảng (4 tầng cuối).'''
+    r, a = np.load(ref_npz), np.load(test_npz)
+    out = {}
+    for part in [p for p in ('patch', 'cls') if p in r.files and p in a.files]:
+        R, A = r[part].astype(np.float64), a[part].astype(np.float64)
+        assert R.shape == A.shape, (part, R.shape, A.shape)
+        R, A = R.reshape(R.shape[0], -1, R.shape[-1]), A.reshape(A.shape[0], -1, A.shape[-1])
+        nr = np.linalg.norm(R, axis=-1)
+        cos = (R * A).sum(-1) / np.maximum(nr * np.linalg.norm(A, axis=-1), 1e-12)
+        ratio = nr / np.maximum(np.median(nr, axis=1, keepdims=True), 1e-12)
+        worst = np.argsort(cos, axis=None)[:n_worst]
+        out[part] = dict(lech=float(np.abs(A - R).max() / max(np.abs(R).max(), 1e-12)), cos_min=float(cos.min()),
+                         phan_vi=[float(v) for v in np.quantile(cos, [1e-4, 1e-3, 1e-2, 0.5])], duoi_0999=int((cos < 0.999).sum()), tong=int(cos.size),
+                         theo_tang=[float(v) for v in cos.min(axis=1)],
+                         te_nhat=[[int(i // cos.shape[1]) - cos.shape[0], float(cos.flat[i]), float(ratio.flat[i])] for i in worst])
+    return out
+
+
+def stats_text(name, st):
+    '''Một dòng mỗi phần cho output notebook (vector tệ nhất chỉ lưu JSON).'''
+    return '\n'.join(f"{name} [{p}] lech {v['lech']:.2e} | cos_min {v['cos_min']:.6f} | cos q 1e-4 / 1e-3 / 1e-2 / 0,5: "
+                     + ' / '.join(f'{x:.6f}' for x in v['phan_vi']) + f" | duoi 0,999: {v['duoi_0999']}/{v['tong']} | theo tang: "
+                     + ' '.join(f'{x:.6f}' for x in v['theo_tang']) for p, v in st.items())
 
 
 def feature_rule(cmp_old, cmp_new, rule=FEATURE_RULE):

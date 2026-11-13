@@ -22,8 +22,10 @@ Mỗi tệp một trách nhiệm:
                        86j: encoder KHÁC qua mã + môi trường của họ — lớp bọc encoders_ho (RAD-DINO kiểu họ / chuẩn, BiomedCLIP của họ), tệp
                        chạy thay setup_and_build_model (launch.inject_encoder), GLoRI hai nửa bắt buộc, report.run_encoder (§16);
                        0.8.1: cổng nạp trọng số THẬT của lớp bọc trong mọi tiến trình (thông tin nạp của thư viện + từng tensor = tệp;
-                       nap_encoder.json mỗi lượt học) — thay thieu_khoa = 0 cố định (§16.4)
+                       nap_encoder.json mỗi lượt học) — thay thieu_khoa = 0 cố định (§16.4);
+                       0.8.2: cổng lớp bọc theo NỀN (fp16 vs fp32, nền = môi trường mới cùng attention) + cổng GPU–CPU cùng môi trường —
+                       thay ngưỡng tuyệt đối cos ≥ 0,999 chưa hiệu chỉnh (§16.4, sau lần chạy đầu raddino_kieu_ho)
 
 Notebook chỉ gọi hàm; khối Drive chuẩn (khoi_doc_drive / khoi_ghi_drive / khoi_ghi_cuoi) vẫn ở ô C0 của notebook và được truyền vào
 dưới dạng hàm (kiem_ke, tai, xung_dot, ghi, ghi_json) — gói không chứa ID Drive."""
-__version__ = '0.8.1'
+__version__ = '0.8.2'
