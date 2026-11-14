@@ -129,6 +129,36 @@ def inject_encoder(linear_glori, name):
     return original
 
 
+def record_their_loading(out_dir):
+    '''Không đặt VB_ENCODER (hàng CheXFound: mô hình + bộ nạp của chính mã họ, như 86f): bọc chexfound.utils.utils.load_pretrained_weights — gọi hàm GỐC
+       (nạp như mã họ, strict=False), rồi so TỪNG tensor của mô hình vừa nạp với khối teacher của tệp (bỏ 'module.' / 'backbone.'; dino_head / ibot_head
+       không thuộc backbone, chỉ đếm) -> NAP_FILE cùng khuôn lớp bọc; trượt -> dừng. setup.py của họ tra hàm này theo tên trong module lúc gọi.'''
+    import torch
+    import chexfound.utils.utils as their_utils
+
+    from vindr_bench.checks import safe_load, weights
+    original = their_utils.load_pretrained_weights
+
+    def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
+        original(model, pretrained_weights, checkpoint_key)
+        ck, src = safe_load.load_checkpoint(pretrained_weights)
+        sd = ck[checkpoint_key] if checkpoint_key is not None and checkpoint_key in ck else ck
+        sd = {k.replace('module.', '').replace('backbone.', ''): v for k, v in sd.items()}
+        heads = sorted(k for k in sd if k.split('.')[0] in ('dino_head', 'ibot_head'))
+        nap = weights.record(source='CheXFound (Drive tac gia) — bo nap cua ho', file_name=os.path.basename(pretrained_weights),
+                             library=f'torch {torch.__version__} (load_pretrained_weights cua ho, strict=False)', model_state=model.state_dict(),
+                             file_tensors={k: v for k, v in sd.items() if k not in set(heads)}, lib_info=None, nguon_tep=src,
+                             khoa_dau_khong_dung=len(heads), nhom_dau_khong_dung=sorted({k.split('.')[0] for k in heads}), encoder='chexfound_cua_ho')
+        if _rank0():
+            with open(os.path.join(out_dir, NAP_FILE), 'w', encoding='utf-8') as f:
+                json.dump(nap, f, ensure_ascii=False, indent=1, default=str)
+        print('NAP_ENCODER ' + weights.loading_text(nap), flush=True)
+        assert nap['dat'], f'CheXFound: nap trong so KHONG dat -> DUNG (xem {NAP_FILE})'
+    load_pretrained_weights._vb_wrapped = True
+    their_utils.load_pretrained_weights = load_pretrained_weights
+    return original
+
+
 def inject_mldecoder(linear_glori, out_dir):
     '''Thay linear_glori.setup_glori bằng setup_mldecoder; mỗi lần gọi ghi bản ghi (số đầu, chiều vào, số tham số, lr) vào out_dir/MLDEC_FILE.'''
     from vindr_bench.heads import mldecoder
@@ -165,6 +195,9 @@ def main(argv=None):
         inject_mldecoder(linear_glori, args.output_dir)
     if os.environ.get(ENCODER_ENV):
         inject_encoder(linear_glori, os.environ[ENCODER_ENV])
+    else:
+        os.makedirs(args.output_dir, exist_ok=True)
+        record_their_loading(args.output_dir)
     record_evaluations(linear_glori, os.path.join(args.output_dir, EVAL_DIR))
     rc = linear_glori.main(args)
     write_memory(args.output_dir)

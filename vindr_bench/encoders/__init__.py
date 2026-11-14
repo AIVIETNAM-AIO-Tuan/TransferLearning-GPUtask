@@ -7,7 +7,7 @@
 from .spec import ORDER, SPECS, EncoderSpec          # noqa: F401
 from ..checks import weights as _weights
 
-BUILT = ('raddino', 'biomedclip')                     # đã có lớp bọc + kiểm tệp thật; các encoder còn lại: bước sau (PLAN_89 §10)
+BUILT = ('raddino', 'biomedclip', 'mrm', 'chexzero', 'evax', 'pubmedclip', 'chexworld')   # lớp bọc + kiểm tệp thật (CheXFound Ver1: mô hình của họ; B: bước 4)
 
 
 def build(name, check=True, **kw):

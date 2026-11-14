@@ -22,10 +22,13 @@ from ..protocols.chexfound_env import dataset as D
 from ..protocols.chexfound_env import environment as E
 from ..protocols.chexfound_env import probes
 from ..protocols.chexfound_env import runner as R
+from ..encoders import files as W
 
 FOLDER = 'stage4_nb89'
 DRIVE_NAMES = ('kiem_ke', 'tai', 'xung_dot', 'ghi', 'ghi_json', 'dong_bo', 'ten_tren_drive', 'tim_moi_noi', 'khoi_phuc_cho', 'luu_resume', 'cho_nho',
-               'GHI_LOC', 'TEN_RESUME', 'RUN_TAG')
+               'GHI_LOC', 'TEN_RESUME', 'RUN_TAG', '_duong', '_liet_ke')   # _duong / _liet_ke: tệp trọng số ngoài cxrlt_2024 (MIMIC_CXR/MRM, /CheXZero)
+THEIR_MODEL = ('chexfound',)          # Ver1: mô hình + bộ nạp của chính mã họ (không lớp bọc), như 86f
+HEADS_V1 = {'chexfound': ('lin1', 'mldec')}   # CheXFound: Linear-4 + GLoRI dùng lại 86f sau cổng PLAN_89 §4.3 (bảng gộp, bước 5)
 WEIGHTS_PLACEHOLDER = 'khong_dung__lop_boc_thay_mo_hinh'      # --pretrained-weights: lớp bọc thay setup_and_build_model -> mã họ không đọc
 PAPER_HEAD = {'lin4': 'Linear', 'glori': 'GLoRI'}               # cột Bảng IV CheXFound tương ứng (linear probing của họ = 4 tầng cuối)
 
@@ -45,7 +48,7 @@ def drive_api(ns):
 
 def setup(encoder, package_dir, ns, log=print):
     '''C2. -> CTX.'''
-    assert encoder in BUILT, f'{encoder}: lop boc chua dung ({BUILT}) -> DUNG'
+    assert encoder in BUILT or encoder in THEIR_MODEL, f'{encoder}: lop boc chua dung ({BUILT}) -> DUNG'
     drive = drive_api(ns)
     assert drive['RUN_TAG'] == run_tag(encoder), f"RUN_TAG {drive['RUN_TAG']!r} != {run_tag(encoder)!r} -> DUNG"
     import vindr_bench
@@ -57,6 +60,7 @@ def setup(encoder, package_dir, ns, log=print):
     st = R.resume_state(drive['tim_moi_noi'](drive['TEN_RESUME']), drive['RUN_TAG'], drive['khoi_phuc_cho'], log=log)
     spec = SPECS[encoder]
     ctx = dict(encoder=encoder, spec=spec, drive=drive, env=env, out=f'/content/out_89v1_{encoder}', csv='/content/vindr_csv_89v1',
+               kinds=HEADS_V1.get(encoder, R.HEAD_ORDER), mo_hinh_cua_ho=encoder in THEIR_MODEL,
                anh_dir='/content/vd518_kcb', moi_truong=mt, moi_truong_ho=ho, chexfound=cf, phien_ban=pb, tt=st,
                goi=dict(phien_ban=__version__, sha=getattr(vindr_bench, 'GOI_SHA', None)))
     i = ho['thong_tin']
@@ -66,7 +70,8 @@ def setup(encoder, package_dir, ns, log=print):
         f"ma cua ho dung xFormers o {pb['xformers_cua_ho']} | CheXFound @ {cf['head'][:12]} | notebook: Python {mt['python']}, torchmetrics "
         f"{mt['moi']['torchmetrics']}, transformers {mt['moi']['transformers']}, timm {mt['moi']['timm']} | o dia trong {mt['dia_trong_gb'] or 0:.0f} GB"
         + (f" | xung dot pip (ghi lai): {mt['xung_dot_pip']}" if mt['xung_dot_pip'] else ''))
-    log(f"encoder {spec.title}: {spec.arch}, anh {spec.image_size}, chuan hoa goc {spec.mean} / {spec.std}, vector toan anh {spec.pool} | goi vindr_bench "
+    log(f"encoder {spec.title}: {spec.arch}, anh {spec.image_size}, chuan hoa goc {spec.mean} / {spec.std}, vector toan anh {spec.pool}"
+        + (' | MO HINH + BO NAP CUA HO (khong lop boc, nhu 86f)' if ctx['mo_hinh_cua_ho'] else '') + f" | dau: {list(ctx['kinds'])} | goi vindr_bench "
         f"{__version__} @ {(ctx['goi']['sha'] or '?')[:12]}" + (f" | RESUME: da xong {sorted(st['xong'])}" if st['xong'] else ''))
     return ctx
 
@@ -87,8 +92,18 @@ def gate(ctx, log=print):
     '''C4. config.yaml của CheXFound + Ver1Run + cổng số học (probes.numeric_gate). Trượt -> dừng.'''
     d, spec = ctx['drive'], ctx['spec']
     cfg = E.fetch_config(d['kiem_ke'], d['tai'], d['xung_dot'], log=log)
-    ctx['run'] = R.Ver1Run(env=ctx['env'], encoder=ctx['encoder'], image_size=spec.image_size, csv_root=ctx['csv'], config_path=cfg,
-                           weights_path=WEIGHTS_PLACEHOLDER, out_root=ctx['out'])
+    ctx['tep_trong_so'] = W.fetch(spec, d, log=log) if spec.drive_dir else None
+    if ctx['tep_trong_so']:
+        t = ctx['tep_trong_so']
+        log(f"trong so tu Drive: {spec.drive_dir}/{t['tep']} | md5 {t['md5']} = ghim | {t['byte']:,} B | {t['so_ban']} ban tren Drive")
+    theirs = ctx['mo_hinh_cua_ho']
+    ctx['run'] = R.Ver1Run(env=ctx['env'], encoder=None if theirs else ctx['encoder'], image_size=spec.image_size, csv_root=ctx['csv'],
+                           config_path=cfg, weights_path=W.weights_path(spec) if theirs else WEIGHTS_PLACEHOLDER, out_root=ctx['out'])
+    if theirs:
+        ctx['cong'] = dict(mo_hinh_cua_ho=True, tep=ctx['tep_trong_so'])
+        log('mo hinh + bo nap cua chinh ma CheXFound (nhu 86f): KHONG co lop boc -> khong co cong so hoc lop boc; nap trong so kiem trong MOI tien '
+            'trinh hoc (so tung tensor voi tep, C5 / C6)')
+        return ctx['cong']
     g = probes.numeric_gate(ctx['env'], ctx['encoder'], ctx['csv'], os.path.join(ctx['out'], 'cong_dac_trung'), spec.image_size, log=log)
     ctx['cong'] = g
     log(f"config.yaml cua CheXFound: {os.path.basename(cfg)} (chi setup + autocast fp16; trong so CheXFound KHONG dung) | cong so hoc: DAT")
@@ -101,7 +116,7 @@ def smoke(ctx, log=print):
         log(f"RESUME (da xong {sorted(ctx['tt']['xong'])}): bo qua chay thu")
         ctx['thu'] = dict(bo_qua_vi_resume=True)
         return ctx['thu']
-    thu = R.smoke_test(ctx['run'], log=log)
+    thu = R.smoke_test(ctx['run'], kinds=ctx['kinds'], log=log)
     for k, v in thu.items():
         m = v['bo_nho'] or {}
         log(f"chay thu {R.HEADS[k]['title']:10s}: {'DAT' if v['dat'] else 'TRUOT'} | {v['so_dau']} dau | GPU dinh "
@@ -115,12 +130,13 @@ def smoke(ctx, log=print):
     return thu
 
 
-def heads(ctx, kinds=R.HEAD_ORDER, log=print):
+def heads(ctx, kinds=None, log=print):
     '''C6. Từng loại đầu có resume (tệp resume ghi đè sau mỗi loại đầu). -> {loại: kết quả}.'''
     import torch
     d = ctx['drive']
     st = ctx['tt']
     save = lambda tt: d['luu_resume'](lambda q: torch.save(dict(tt, cho=d['cho_nho']()), q))
+    kinds = kinds or ctx['kinds']
     out = {}
     for k in kinds:
         out[k] = R.head_step(ctx['run'], k, st, d['GHI_LOC'], d['ghi'], save, log=log)
@@ -190,9 +206,10 @@ def report(ctx, log=print):
         return None
 
 
-def sync(ctx, kinds=R.HEAD_ORDER, log=print):
+def sync(ctx, kinds=None, log=print):
     '''C8. dong_bo() + kiểm 3 tệp mỗi loại đầu + bảng C7 trên Drive.'''
     d = ctx['drive']
+    kinds = kinds or ctx['kinds']
     du = d['dong_bo']()
     need = [t for k in kinds for t in ctx['tt']['xong'].get(k, [])]
     bg = ctx.get('tep_bang')

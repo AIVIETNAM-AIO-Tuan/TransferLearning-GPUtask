@@ -20,6 +20,7 @@ import subprocess
 import tarfile
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 from . import dataset as D
 from .environment import TheirEnv, child_env
@@ -54,7 +55,7 @@ _HEX32 = re.compile(r'(?<![0-9A-Za-z])[0-9a-f]{32}(?![0-9A-Za-z])')
 class Ver1Run:
     '''Cấu hình chung mọi lượt của một notebook Ver1.'''
     env: TheirEnv
-    encoder: str                  # tên lớp bọc vindr_bench.encoders (VB_ENCODER)
+    encoder: Optional[str]        # tên lớp bọc vindr_bench.encoders (VB_ENCODER); None = mô hình + bộ nạp của chính mã họ (CheXFound, như 86f)
     image_size: int               # --image-size = độ phân giải gốc của encoder
     csv_root: str
     config_path: str              # config.yaml của CheXFound (setup(args) + autocast fp16 của họ)
@@ -80,13 +81,21 @@ def _last_progress(log_path):
     return ''
 
 
-def run_torchrun(run, args, log_path, env_extra=None, poll_s=180, log=print):
-    '''torchrun --nproc_per_node=1 launch.py <args> bằng Python của họ; log vào log_path; mỗi poll_s giây in dòng tiến độ cuối. -> dict.'''
+def torchrun_env(run, env_extra=None):
+    '''Biến môi trường của tiến trình học: cô lập (child_env) + VB_ENCODER (chỉ khi có lớp bọc; mô hình của họ: KHÔNG đặt) + VB_HEAD của loại đầu.
+       Biến VB_WEIGHTS_DIR (tệp Drive) thừa hưởng từ os.environ.'''
     env = child_env(run.env)
     for k in ('VB_ENCODER', 'VB_HEAD'):
         env.pop(k, None)
-    env['VB_ENCODER'] = run.encoder
+    if run.encoder:
+        env['VB_ENCODER'] = run.encoder
     env.update(env_extra or {})
+    return env
+
+
+def run_torchrun(run, args, log_path, env_extra=None, poll_s=180, log=print):
+    '''torchrun --nproc_per_node=1 launch.py <args> bằng Python của họ; log vào log_path; mỗi poll_s giây in dòng tiến độ cuối. -> dict.'''
+    env = torchrun_env(run, env_extra)
     if run.use_torchrun:
         cmd = [run.env.python, '-m', 'torch.distributed.run', '--nproc_per_node=1', '--standalone', LAUNCH, *[str(a) for a in args]]
     else:
@@ -276,7 +285,7 @@ def run_head(run, kind, log=print):
     assert kind in HEADS, kind
     t0 = time.time()
     h = HEADS[kind]
-    log(f"== {h['title']} ({kind}): ma cua ho, luoi {len(PAPER_LRS)} lr cua bai, lo {BATCH}, anh {run.image_size}, 10 + 10 epoch, encoder {run.encoder}"
+    log(f"== {h['title']} ({kind}): ma cua ho, luoi {len(PAPER_LRS)} lr cua bai, lo {BATCH}, anh {run.image_size}, 10 + 10 epoch, encoder {run.encoder or 'CheXFound (mo hinh cua ho)'}"
         + (', hai nua luoi 5 + 4' if h['halves'] else ''))
     grids = HALVES if h['halves'] else (PAPER_LRS,)
     runs = []

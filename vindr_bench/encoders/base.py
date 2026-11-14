@@ -68,10 +68,16 @@ class EncoderWrapper(nn.Module):
             f'{self.spec.name}: anh {tuple(x.shape)} khac do phan giai goc {s} (khong noi suy vi tri) -> DUNG'
         outs = []
         for h in self._blocks_chunked(x, int(n_last_blocks)):
-            patch = h[:, self.n_prefix:]
+            patch, vec = self._patch_and_vector(h)
             assert patch.shape[1] == self.spec.n_patches and patch.shape[2] == self.spec.embed_dim, (self.spec.name, tuple(h.shape))
-            outs.append((patch, h[:, 0] if self.spec.pool == 'cls' else patch.mean(1)))
+            outs.append((patch, vec))
         return tuple(outs) if return_class_token else tuple(p for p, _ in outs)
+
+    def _patch_and_vector(self, h):
+        '''h [B, tiền tố + T, D] (đầu ra _blocks) -> (token patch, vector toàn ảnh) theo spec.pool: 'cls' = token đầu; 'mean_patch' = TB token patch
+           (đã qua norm cuối). Lớp con đổi khi đường chính thức khác (EVA-X 'norm_of_mean': _blocks trả token THÔ, norm áp sau).'''
+        patch = h[:, self.n_prefix:]
+        return patch, (h[:, 0] if self.spec.pool == 'cls' else patch.mean(1))
 
     def forward(self, x):
         '''Vector toàn ảnh của tầng cuối.'''
