@@ -7,7 +7,8 @@
 from .spec import ORDER, SPECS, EncoderSpec          # noqa: F401
 from ..checks import weights as _weights
 
-BUILT = ('raddino', 'biomedclip', 'mrm', 'chexzero', 'evax', 'pubmedclip', 'chexworld')   # lớp bọc + kiểm tệp thật (CheXFound Ver1: mô hình của họ; B: bước 4)
+# lớp bọc + kiểm tệp thật. 'chexfound': lớp bọc CHỈ cho Ver2 — Ver1 chạy mô hình + bộ nạp của chính mã họ (notebook/ver1.THEIR_MODEL). B: bước 4.
+BUILT = ('chexfound', 'raddino', 'biomedclip', 'mrm', 'chexzero', 'evax', 'pubmedclip', 'chexworld')
 
 
 def build(name, check=True, **kw):

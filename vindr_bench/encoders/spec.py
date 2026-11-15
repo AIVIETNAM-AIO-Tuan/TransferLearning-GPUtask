@@ -58,9 +58,11 @@ SPECS = {s.name: s for s in (
                 'vector toàn ảnh = CLS sau norm của trunk, TRƯỚC phép chiếu 512 chiều (quy ước linear probe của CLIP); lớp bọc của CheXFound đưa vector đã chiếu'),
     EncoderSpec('chexfound', 'CheXFound', 'ViT-L/16 (DINOv2 của họ, có register)', 512, 16, 1024, IMAGENET_MEAN, IMAGENET_STD, 'cls',
                 'Drive tác giả: teacher_checkpoint.pth + config.yaml (md5 đã ghi ở 86)', 'MIT (repo)',
-                'CXR-987K, 12 nguồn công khai; VinDr không nằm trong tiền huấn luyện (bài §IV-B)', 'chua_dung', 'mã 7e288d0 + bài arXiv 2502.05142v2; đã chạy ở 86',
-                'Ver1: KHÔNG lớp bọc — mô hình + bộ nạp của chính mã họ (setup_and_build_model, --pretrained-weights, block_chunks=4) như 86f; lớp bọc cho Ver2: '
-                'bước 3', drive_dir='cxrlt_2024/chexfound', drive_file='teacher_checkpoint.pth', file_md5='6976431a96978f27da057e1b9e35dcc4',
+                'CXR-987K, 12 nguồn công khai; VinDr không nằm trong tiền huấn luyện (bài §IV-B)', 'da_dung',
+                'mã 7e288d0 + bài arXiv 2502.05142v2; đã chạy ở 86; tệp thật 15/11',
+                'Ver1: KHÔNG lớp bọc — mô hình + bộ nạp của chính mã họ (setup_and_build_model, --pretrained-weights, block_chunks=4) như 86f. Ver2: lớp '
+                'bọc encoders/chexfound.py (mã mô hình của họ chép vào chexfound_src, số khúc theo checkpoint, attention SDPA như 86b)',
+                drive_dir='cxrlt_2024/chexfound', drive_file='teacher_checkpoint.pth', file_md5='6976431a96978f27da057e1b9e35dcc4',
                 file_size=1610888895),
     EncoderSpec('mrm', 'MRM', 'ViT-B/16 (timm VisionTransformer = models_vit.vit_base_patch16 của họ)', 224, 16, 768, _G3(0.4978), _G3(0.2449), 'mean_patch',
                 'Drive tác giả (README RL4M/MRM-pytorch @ 3730ba4): MRM.pth — checkpoint huấn luyện đầy đủ, dùng 150 khoá encoder ảnh của "model"', 'MIT',

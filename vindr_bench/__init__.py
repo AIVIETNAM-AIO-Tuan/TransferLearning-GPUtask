@@ -4,15 +4,19 @@ Mã sạch viết lại cho module 89 (Tuấn 13/11): mỗi thư mục con một
 Module 86 (`vindr_protocol`) giữ nguyên làm hồ sơ các notebook đã chạy; logic đã kiểm ở 86 được chép sang đây có ghi nguồn + phép kiểm trùng.
 
     encoders/                 mỗi encoder một tệp: nạp trọng số gốc + lớp bọc (giao diện chung cho mọi đầu đọc); spec.py = bảng 9 encoder;
-                              files.py = tệp trọng số trên Drive của ta (tên cố định, md5 ghim); clip_openai.py = tháp ảnh CLIP OpenAI
+                              files.py = tệp trọng số trên Drive của ta (tên cố định, md5 ghim); clip_openai.py = tháp ảnh CLIP OpenAI;
+                              chexfound.py + chexfound_src/ = lớp bọc CheXFound cho Ver2 (mã mô hình của họ, MIT / Apache 2.0)
     checks/                   cổng: weights.py (từng tensor = tệp) · features.py (số học theo nền) · safe_load.py (nạp checkpoint an toàn, torch 2.0 + mới)
-    data/                     vindr.py: kho ảnh 518 của 85 (đệm vuông, cân bằng / không cân bằng histogram), nhãn 28 lớp, tách
-    heads/                    mldecoder.py: đầu ML-Decoder (lớp của 85f) + bộ chuyển cho giao diện đầu đọc của CheXFound
+    data/                     vindr.py: kho ảnh 518 của 85 (đệm vuông, cân bằng / không cân bằng histogram), nhãn 28 lớp, tách ·
+                              transforms.py (biến đổi ảnh của mã CheXFound) · loaders.py (tập ảnh + dòng mẫu vô hạn cho vòng học của ta)
+    heads/                    mldecoder.py: đầu ML-Decoder (lớp của 85f) + bộ chuyển cho giao diện đầu đọc của CheXFound ·
+                              linear.py · glori.py (mã công khai của CheXFound, cho Ver2)
     protocols/chexfound_env/  Ver1: môi trường của họ, tệp chạy torchrun (tiêm lớp bọc + ML-Decoder), cổng số học, điều phối 4 loại đầu
+    protocols/ours/           Ver2: giao thức `86b` cho 4 loại đầu trên lớp bọc chung (dò lr -> thêm hạt -> pha 2), cổng, khôi phục theo giai đoạn
     evaluation/               metrics.py (ngữ nghĩa torchmetrics 0.10.3, AUPRC hình thang, bootstrap trọng số) · panels.py (28 / 27 / 21 / 7)
-    notebook/                 ver1.py: một hàm cho mỗi ô của notebook Ver1
-    (bước sau)                protocols/ours (Ver2), kho cắt giữa, lớp bọc CheXFound (Ver2) + B, bảng gộp (max-T)
+    notebook/                 ver1.py · ver2.py: một hàm cho mỗi ô của notebook
+    (bước sau)                kho cắt giữa, lớp bọc B, bảng gộp (max-T)
 
-Gói không chứa ID Drive, không chứa dữ liệu. Phần chạy trong tiến trình của họ (encoders, heads, protocols/chexfound_env/{launch, dataset,
-probe_features}) chỉ dùng cú pháp / API có ở Python 3.9 + torch 2.0."""
-__version__ = '0.3.0'          # 0.3.0 (14/11): lớp bọc MRM, CheXzero, EVA-X, PubMedCLIP, CheXWorld + hàng CheXFound bằng mô hình của họ (Ver1)
+Gói không chứa ID Drive, không chứa dữ liệu. Phần chạy trong tiến trình của họ (encoders, heads/mldecoder, protocols/chexfound_env/{launch, dataset,
+probe_features}) chỉ dùng cú pháp / API có ở Python 3.9 + torch 2.0; protocols/ours + notebook/ver2 chỉ chạy ở Python của notebook."""
+__version__ = '0.4.0'          # 0.4.0 (15/11): Ver2 — protocols/ours, lớp bọc CheXFound, notebook/ver2 (8 hàng x 2 kho đệm vuông)
