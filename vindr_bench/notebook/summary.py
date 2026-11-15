@@ -75,7 +75,7 @@ def collect(ctx, log=print):
     for k, n in dl['co'].items():
         log(f"  {'CO   ' if n else 'THIEU'} {k}: {n} bo")
     for m in dl['thieu']:
-        if not m.startswith(('Ver1 b:', 'Ver2 b ')):
+        if not m.startswith('Ver1 b:'):                                  # B chưa có Ver1 (notebook/ver1.NOT_VER1)
             log(f'  ! {m}')
     k = dl['kiem_86f']
     if k:
@@ -90,8 +90,23 @@ def collect(ctx, log=print):
     return dl
 
 
+CACHE_RE = r'bo_dem_bootstrap_\d{8}_\d{6}\.npz'
+
+
+def load_cache(ctx, log=print):
+    '''Bộ nhớ đệm bootstrap MỚI NHẤT trên Drive (stage4_nb89/r89t_tong_hop; ghi ở C8) -> {khoá: set_stats}; chưa có / phiên bản cách tính khác -> {}.'''
+    d = ctx['drive']
+    kk = d['kiem_ke']((CL.FOLDER, RUN_TAG), mau=CACHE_RE)[1]
+    if not kk:
+        return {}
+    name = sorted(kk)[-1]
+    cache = CP.load_cache(d['tai'](kk[name][0]))
+    log(f"bo nho dem bootstrap: {name} -> {len(cache)} bo" + ('' if cache else ' (phien ban cach tinh khac -> tinh lai)'))
+    return cache
+
+
 def score(ctx, log=print, n_boot=P.N_BOOT, workers=None):
-    '''C4. -> {(ver, kho, encoder, đầu, nhánh): ô}.'''
+    '''C4. -> {(ver, kho, encoder, đầu, nhánh): ô}. Bộ đã có trong bộ nhớ đệm (cùng dự đoán, nhãn, cột, tham số) không tính lại.'''
     dl, t0 = ctx['dl'], time.time()
     cols = {}
     for s in dl['sets']:
@@ -99,7 +114,16 @@ def score(ctx, log=print, n_boot=P.N_BOOT, workers=None):
         if k not in cols:
             cols[k] = P.panel_columns(dl['nhan'], dl['lop_chinh'], s.target)
     workers = workers or min(8, os.cpu_count() or 1)
-    stats = CP.many_stats([(s.preds, s.target, cols[CP.target_key(s.target)], n_boot, P.BOOT_SEED, P.HALF_SEED) for s in dl['sets']], workers)
+    jobs = [(s.preds, s.target, cols[CP.target_key(s.target)], n_boot, P.BOOT_SEED, P.HALF_SEED) for s in dl['sets']]
+    keys = [CP.stats_key(*j) for j in jobs]
+    cache = ctx['bo_dem'] if 'bo_dem' in ctx else load_cache(ctx, log)
+    todo = [i for i, k in enumerate(keys) if k not in cache]
+    log(f"{len(jobs)} bo du doan | da co trong bo nho dem bootstrap (Drive): {len(jobs) - len(todo)} | can tinh: {len(todo)} "
+        f"({workers} tien trinh; ~4–9 giay / bo / nhan CPU)")
+    for i, st in zip(todo, CP.many_stats([jobs[i] for i in todo], workers, log=log)):
+        cache[keys[i]] = st
+    stats = [cache[k] for k in keys]
+    ctx.update(bo_dem=cache, bo_dem_moi=len(todo))
     groups = {}
     for s, st in zip(dl['sets'], stats):
         groups.setdefault(s.cell, []).append((s, st))
@@ -323,9 +347,15 @@ def sync(ctx, log=print):
     for name, fig in ctx.get('hinh', {}).items():
         names.append(f'hinh_{name}_{t}.png')
         d['ghi'](names[-1], lambda q, fig=fig: fig.savefig(q, dpi=160, bbox_inches='tight'))
+    n_cache = 0
+    if ctx.get('bo_dem_moi'):                                     # có bộ mới tính -> ghi bộ nhớ đệm đầy đủ (lần sau chỉ tính lượt mới)
+        names.append(f'bo_dem_bootstrap_{t}.npz')
+        d['ghi'](names[-1], lambda q: CP.save_cache(q, ctx['bo_dem']))
+        n_cache = 1
     du = d['dong_bo']()
     on = d['ten_tren_drive']()
     co = set(names) <= on
-    log(f"C8: da ghi {len(names)} tep (1 JSON, {'1 CSV, ' if rows else ''}{len(ctx.get('hinh', {}))} PNG) | dong_bo {'DU' if du else 'CHUA DU'} | tren Drive: "
+    log(f"C8: da ghi {len(names)} tep (1 JSON, {'1 CSV, ' if rows else ''}{len(ctx.get('hinh', {}))} PNG"
+        + (f", bo nho dem bootstrap {len(ctx['bo_dem'])} bo" if n_cache else ', bo nho dem khong doi') + f") | dong_bo {'DU' if du else 'CHUA DU'} | tren Drive: "
         f"{'CO du' if co else 'THIEU'}" + ('' if du and co else ' | KHONG tat runtime; chay lai C8'))
     return dict(dong_bo=du, du_tep=co, tep=names)

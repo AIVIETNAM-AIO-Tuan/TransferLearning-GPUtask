@@ -28,6 +28,7 @@ FOLDER = 'stage4_nb89'
 DRIVE_NAMES = ('kiem_ke', 'tai', 'xung_dot', 'ghi', 'ghi_json', 'dong_bo', 'ten_tren_drive', 'tim_moi_noi', 'khoi_phuc_cho', 'luu_resume', 'cho_nho',
                'GHI_LOC', 'TEN_RESUME', 'RUN_TAG', '_duong', '_liet_ke')   # _duong / _liet_ke: tệp trọng số ngoài cxrlt_2024 (MIMIC_CXR/MRM, /CheXZero)
 THEIR_MODEL = ('chexfound',)          # Ver1: mô hình + bộ nạp của chính mã họ (không lớp bọc), như 86f
+NOT_VER1 = ('b',)                     # B: lớp bọc chưa kiểm trong môi trường thư viện của họ (tiến trình torchrun) -> chưa có notebook Ver1
 HEADS_V1 = {'chexfound': ('lin1', 'mldec')}   # CheXFound: Linear-4 + GLoRI dùng lại 86f sau cổng PLAN_89 §4.3 (bảng gộp, bước 5)
 WEIGHTS_PLACEHOLDER = 'khong_dung__lop_boc_thay_mo_hinh'      # --pretrained-weights: lớp bọc thay setup_and_build_model -> mã họ không đọc
 PAPER_HEAD = {'lin4': 'Linear', 'glori': 'GLoRI'}               # cột Bảng IV CheXFound tương ứng (linear probing của họ = 4 tầng cuối)
@@ -48,7 +49,7 @@ def drive_api(ns):
 
 def setup(encoder, package_dir, ns, log=print):
     '''C2. -> CTX.'''
-    assert encoder in BUILT or encoder in THEIR_MODEL, f'{encoder}: lop boc chua dung ({BUILT}) -> DUNG'
+    assert (encoder in BUILT or encoder in THEIR_MODEL) and encoder not in NOT_VER1, f'{encoder}: chua co Ver1 cho hang nay ({BUILT}, tru {NOT_VER1}) -> DUNG'
     drive = drive_api(ns)
     assert drive['RUN_TAG'] == run_tag(encoder), f"RUN_TAG {drive['RUN_TAG']!r} != {run_tag(encoder)!r} -> DUNG"
     import vindr_bench

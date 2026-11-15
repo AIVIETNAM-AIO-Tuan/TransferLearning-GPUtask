@@ -155,8 +155,8 @@ def gate(ctx, log=print):
     d, spec, vd = ctx['drive'], ctx['spec'], ctx['vindr']
     ctx['tep_trong_so'] = W.fetch(spec, d, log=log) if spec.drive_dir else None
     if ctx['tep_trong_so']:
-        t = ctx['tep_trong_so']
-        log(f"trong so tu Drive: {spec.drive_dir}/{t['tep']} | md5 {t['md5']} = ghim | {t['byte']:,} B | {t['so_ban']} ban tren Drive")
+        for t in [ctx['tep_trong_so']] + list(ctx['tep_trong_so'].get('phu') or []):
+            log(f"tep tu Drive: {spec.drive_dir}/{t['tep']} | md5 {t['md5']} = ghim | {t['byte']:,} B | {t['so_ban']} ban tren Drive")
     with quiet_hub():
         bb = BB.load(ctx['encoder'], ctx['device'], ctx['amp'])
     nap = bb.enc.nap

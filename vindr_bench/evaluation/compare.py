@@ -40,33 +40,89 @@ def draws_ap(preds, target, n_boot=P.N_BOOT, seed=P.BOOT_SEED):
     return np.stack([M.ap_weighted(pre, w) for w in weights(len(target), n_boot, seed)])
 
 
+STATS_VERSION = 'p21_v1'          # đổi cách tính set_stats -> đổi chuỗi này: bộ nhớ đệm cũ tự bị bỏ qua
+
+
 def set_stats(preds, target, cols, n_boot=P.N_BOOT, seed=P.BOOT_SEED, half_seed=P.HALF_SEED):
-    '''Một bộ dự đoán -> dict(diem {panel: {ap, auprc_thang, auroc}}, ap21_lop, m21 / m7 [n_boot] (NaN = lần rút bị loại), nua [AP21 nửa 0, nửa 1]).'''
+    '''Một bộ dự đoán -> dict(diem {panel: {ap, auprc_thang, auroc}}, ap21_lop, m21 / m7 [n_boot] (NaN = lần rút bị loại), nua [AP21 nửa 0, nửa 1]).
+       Bootstrap CHỈ trên 21 lớp chính (p7 ⊂ p21): AP từng cột tính độc lập -> cùng số với tính đủ 28 cột, bớt 1/4 việc.'''
     preds, target = np.asarray(preds, dtype=np.float32), np.asarray(target)
     assert preds.shape == target.shape and np.isfinite(preds).all(), 'du doan / nhan KHONG khop hoac khong huu han -> DUNG'
     pts = {p: P.point(preds, target, cols[p]) for p in P.PANELS}
-    D = draws_ap(preds, target, n_boot, seed)
-    m = {p: np.where(np.isfinite(D[:, cols[p]]).all(1), np.nan_to_num(D[:, cols[p]]).mean(1), np.nan) for p in ('p21', 'p7')}
+    c21 = [int(j) for j in cols['p21']]
+    pos7 = [c21.index(int(j)) for j in cols['p7']]
+    D = draws_ap(preds[:, c21], target[:, c21], n_boot, seed)
+    m = {p: np.where(np.isfinite(D[:, c]).all(1), np.nan_to_num(D[:, c]).mean(1), np.nan) for p, c in (('p21', list(range(len(c21)))), ('p7', pos7))}
     half = M.halves(len(target), half_seed)
     return dict(diem={p: {k: float(pts[p][k]) for k in ('ap', 'auprc_thang', 'auroc')} for p in P.PANELS},
                 ap21_lop=[float(v) for v in pts['p21']['ap_lop']], m21=m['p21'], m7=m['p7'],
                 nua=[float(P.point(preds[half == h], target[half == h], cols['p21'])['ap']) for h in (0, 1)])
 
 
+def stats_key(preds, target, cols, n_boot=P.N_BOOT, seed=P.BOOT_SEED, half_seed=P.HALF_SEED):
+    '''Khoá bộ nhớ đệm của một set_stats: md5(dự đoán float32 + nhãn int8 + cột panel + tham số bootstrap + STATS_VERSION).'''
+    import json
+    h = hashlib.md5()
+    h.update(np.ascontiguousarray(np.asarray(preds), dtype=np.float32).tobytes())
+    h.update(np.ascontiguousarray(np.asarray(target), dtype=np.int8).tobytes())
+    h.update(json.dumps(dict(c={p: [int(j) for j in cols[p]] for p in sorted(cols)}, n=int(n_boot), s=int(seed), hs=int(half_seed), v=STATS_VERSION),
+                        sort_keys=True).encode())
+    return h.hexdigest()
+
+
+def save_cache(path, cache):
+    '''{khoá: set_stats} -> một tệp .npz (KHÔNG pickle): mảng m21_i / m7_i + chỉ mục JSON (khoá, điểm, AP từng lớp, hai nửa).'''
+    import json
+    keys = sorted(cache)
+    meta = dict(v=STATS_VERSION, keys=keys, idx={k: dict(diem=cache[k]['diem'], ap21_lop=cache[k]['ap21_lop'], nua=cache[k]['nua']) for k in keys})
+    arr = {f'{n}_{i}': np.asarray(cache[k][n], dtype=np.float64) for i, k in enumerate(keys) for n in ('m21', 'm7')}
+    np.savez_compressed(path, chi_muc=np.frombuffer(json.dumps(meta).encode('utf-8'), dtype=np.uint8), **arr)
+
+
+def load_cache(path):
+    '''Ngược save_cache. Tệp của phiên bản cách tính khác -> {} (tính lại).'''
+    import json
+    with np.load(path, allow_pickle=False) as z:
+        meta = json.loads(z['chi_muc'].tobytes().decode('utf-8'))
+        if meta.get('v') != STATS_VERSION:
+            return {}
+        return {k: dict(meta['idx'][k], m21=z[f'm21_{i}'].copy(), m7=z[f'm7_{i}'].copy()) for i, k in enumerate(meta['keys'])}
+
+
 def _job(a):
     return set_stats(*a)
 
 
-def many_stats(jobs, workers=1):
-    '''jobs = [(preds, target, cols, n_boot, seed, half_seed)] -> [set_stats]. workers > 1: chia tiến trình (mỗi tiến trình tự sinh lại cùng dãy rút).'''
-    if workers > 1 and len(jobs) > 1:
+def many_stats(jobs, workers=1, log=None):
+    '''jobs = [(preds, target, cols, n_boot, seed, half_seed)] -> [set_stats] (đúng thứ tự). workers > 1: tiến trình con kiểu 'spawn' (không fork từ notebook
+       nhiều luồng — fork có thể treo); mỗi tiến trình tự sinh lại cùng dãy rút. log: in tiến độ ~10 % một lần + thời gian còn lại ước.'''
+    import time
+    n, out, t0 = len(jobs), [None] * len(jobs), time.time()
+    step = max(1, n // 10)
+
+    def tick(done):
+        if log is not None and (done % step == 0 or done == n):
+            el = time.time() - t0
+            log(f'  bootstrap {done}/{n} bo | {el / 60:.1f} phut | con ~{el / done * (n - done) / 60:.1f} phut')
+
+    if workers > 1 and n > 1:
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor, as_completed
         try:
-            from concurrent.futures import ProcessPoolExecutor
-            with ProcessPoolExecutor(max_workers=workers) as ex:
-                return list(ex.map(_job, jobs, chunksize=1))
-        except Exception:                           # không tạo được tiến trình con (môi trường hạn chế) -> chạy lần lượt, kết quả như nhau
-            pass
-    return [_job(j) for j in jobs]
+            with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context('spawn')) as ex:
+                fut = {ex.submit(_job, j): i for i, j in enumerate(jobs)}
+                for k, f in enumerate(as_completed(fut), 1):
+                    out[fut[f]] = f.result()
+                    tick(k)
+            return out
+        except (OSError, RuntimeError, ImportError) as e:   # không mở được tiến trình con (môi trường hạn chế) -> chạy lần lượt, kết quả như nhau
+            if log is not None:
+                log(f'  ! tien trinh con loi ({type(e).__name__}: {str(e)[:120]}) -> chay lan luot')
+            out, t0 = [None] * n, time.time()
+    for i, j in enumerate(jobs):
+        out[i] = _job(j)
+        tick(i + 1)
+    return out
 
 
 def _ci(v):

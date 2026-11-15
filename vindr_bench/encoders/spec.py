@@ -34,11 +34,18 @@ class EncoderSpec:
     drive_file: Optional[str] = None       # tên tệp trọng số trong thư mục đó
     file_md5: Optional[str] = None         # md5 + kích thước tệp Drive đã ghim (bản tải từ nguồn công khai của tác giả, kiểm trên máy)
     file_size: Optional[int] = None
+    extra_files: Tuple[Tuple[str, str, int], ...] = ()   # tệp phụ CÙNG thư mục Drive (tên, md5, kích thước) — vd cấu hình của B (backbone_ft.pt)
 
     def __post_init__(self):
         assert self.pool in POOLS and self.status in ('da_dung', 'chua_dung'), (self.name, self.pool, self.status)
         assert self.image_size % self.patch_size == 0, (self.name, self.image_size, self.patch_size)
         assert (self.drive_dir is None) == (self.drive_file is None) == (self.file_md5 is None) == (self.file_size is None), self.name
+        assert not self.extra_files or (self.drive_dir and all(len(e) == 3 and e[1] and int(e[2]) > 0 for e in self.extra_files)), self.name
+
+    @property
+    def drive_files(self):
+        '''-> [(tên, md5, kích thước)] mọi tệp Drive của hàng: tệp trọng số chính trước, rồi tệp phụ.'''
+        return ([(self.drive_file, self.file_md5, int(self.file_size))] if self.drive_file else []) + [tuple(e) for e in self.extra_files]
 
     @property
     def n_patches(self):
@@ -98,8 +105,14 @@ SPECS = {s.name: s for s in (
                 'định của timm tạo fc_norm và bỏ norm — bẫy gặp 06/11)',
                 drive_dir='cxrlt_2024/chexworld', drive_file='chexworld_pretrained.tar', file_md5='15970f4d0396326f55990c08a965cde9', file_size=733569866),
     EncoderSpec('b', 'B (s42)', 'ViT-B/14 + luồng vùng (của ta, khởi tạo từ RAD-DINO)', 518, 14, 768, _G3(0.5307), _G3(0.2583), 'cls',
-                'checkpoint của ta (gói trọng số xuất từ lượt B của Ver2)', 'của ta', 'MIMIC-CXR (CXR-LT) + thừa hưởng RAD-DINO', 'chua_dung', 'PLAN_86 §4.2',
-                'CLS / patch lấy SAU luồng vùng + ghi ngược; đầu ML-Decoder đọc thêm token vùng; huấn luyện ở bf16, ảnh cân bằng histogram'),
+                'checkpoint của ta: lượt 78x r78x_J_v3b_dp_ema_v2_skip7_s42 ep5 (= mốc B của 85f / 86b_B) — rs_J_bert_dong_ep5.pt (md5 93cf2f85…) + '
+                'backbone_ft.pt (cấu hình, md5 192def5e…) trên cxrlt_2024/stage4_nb78x/<lượt>', 'của ta', 'MIMIC-CXR (CXR-LT) + thừa hưởng RAD-DINO', 'da_dung',
+                'khối 78 / 79 + ô C2 / C2b / C6S / C7B của 86b_B (15/11); lớp bọc encoders/b.py kiểm checkpoint giả + TỆP THẬT (Tuấn tải 15/11) ở hai môi trường',
+                'Tuấn 15/11: đông cứng, dùng NHƯ MỌI backbone — CLS / patch lấy SAU luồng vùng + ghi ngược; ML-Decoder chỉ đọc token patch (85f đọc thêm 36 token '
+                'vùng: + 0,0037 [−0,0005; +0,0085] mAP21, không phân biệt); huấn luyện ở bf16, ảnh cân bằng histogram',
+                drive_dir='cxrlt_2024/stage4_nb78x/r78x_J_v3b_dp_ema_v2_skip7_s42', drive_file='rs_J_bert_dong_ep5.pt',
+                file_md5='93cf2f85cd3c191fbb6cce0304f2de17', file_size=537538740,
+                extra_files=(('backbone_ft.pt', '192def5e64e468520754ad5fcb7c83cc', 537515907),)),
 )}
 ORDER = ('b', 'chexfound', 'raddino', 'biomedclip', 'mrm', 'chexzero', 'evax', 'pubmedclip', 'chexworld')
 assert set(ORDER) == set(SPECS) and len(ORDER) == 9

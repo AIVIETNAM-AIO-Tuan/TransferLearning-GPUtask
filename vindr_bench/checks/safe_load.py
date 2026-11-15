@@ -69,6 +69,7 @@ def _restricted_pickle(allowed):
 EXTRA = {
     'namespace': {NAMESPACE},                                                     # MRM ('args'), CheXWorld
     'numpy_scalar': {'__builtin__.set', 'builtins.set', '_codecs.encode', 'numpy.core.multiarray.scalar', 'numpy.dtype'},   # EVA-X (số vô hướng numpy)
+    'torch_version': {'torch.torch_version.TorchVersion'},                       # B: backbone_ft.pt ghi torch.__version__ (lớp con của str) — tệp thật 15/11
 }
 
 
