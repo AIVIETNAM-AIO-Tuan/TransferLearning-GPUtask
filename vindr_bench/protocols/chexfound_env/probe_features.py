@@ -10,7 +10,8 @@ Chép ý của vindr_protocol/upstream/probe_features.py @ 0.8.2 (86j), dùng l�
      python probe_features.py --encoder TEN --input X.npy --out Y.npz --amp fp16|none [--device cuda|cpu] [--attn eager]
      -> get_intermediate_layers(x, 4, return_class_token=True) dưới inference_mode (+ autocast fp16 nếu --amp fp16, như ModelWithIntermediateLayers của
         họ); --amp none: fp32, TF32 tắt (tham chiếu). Lưu patch [4, B, T, D] + cls [4, B, D] + info (phiên bản, nạp trọng số THẬT của tiến trình này).
-        --attn chỉ cho RAD-DINO ở môi trường mới (eager = thuật toán duy nhất của transformers 4.36.2).
+        --attn chỉ cho RAD-DINO / B ở môi trường mới (eager = thuật toán duy nhất của transformers 4.36.2). Tham số dựng riêng của Ver1 (BUILD_KW, vd khúc
+        ô của B) áp như ở tiến trình học.
 Gói nạp qua PYTHONPATH (thư mục chứa vindr_bench). Chỉ cú pháp / API có ở Python 3.9 + torch 2.0."""
 import json
 import os
@@ -45,9 +46,10 @@ def features(a):
     import torch
 
     from vindr_bench import encoders
+    from vindr_bench.protocols.chexfound_env import BUILD_KW
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
-    kw = dict(attn=attn) if attn else {}
+    kw = dict(BUILD_KW.get(encoder, {}), **(dict(attn=attn) if attn else {}))     # = lớp bọc của tiến trình học (launch.inject_encoder)
     model = encoders.build(encoder, check=False, **kw)      # nạp THẬT trong tiến trình này; trượt -> ghi lại, bên gọi báo không đạt
     t = model.nap['thong_tin_nap']
     versions = {}

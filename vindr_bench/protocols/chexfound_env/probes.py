@@ -3,7 +3,7 @@
 đặc trưng của lớp bọc (= thiết kế C4 của 86j, đã chạy 13/11):
 
     cũ (Python của họ):  GPU fp16 (như lượt học) · GPU fp32 · CPU fp32
-    mới (Python notebook): GPU fp32 · GPU fp16 · CPU fp32          (RAD-DINO: attention eager = thuật toán duy nhất của transformers 4.36.2)
+    mới (Python notebook): GPU fp32 · GPU fp16 · CPU fp32          (RAD-DINO, B: attention eager = thuật toán duy nhất của transformers 4.36.2)
 
   cổng fp16     = cũ fp16 vs cũ fp32, ngưỡng theo NỀN mới fp16 vs mới fp32       (checks.features.relative_gate: tương đối + chặn bền)
   cổng GPU–CPU  = cũ GPU vs cũ CPU (fp32), nền mới GPU vs mới CPU
@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, 'probe_features.py')
 N_IMAGES = 4
 TIMEOUT_S = 30 * 60
-NEW_ENV_ATTN = {'raddino': 'eager'}           # môi trường mới: cùng thuật toán attention với môi trường cũ (transformers 4.36.2 chỉ có eager)
+NEW_ENV_ATTN = {'raddino': 'eager', 'b': 'eager'}   # môi trường mới: cùng thuật toán attention với môi trường cũ (transformers 4.36.2 chỉ có eager; B = RAD-DINO + luồng vùng)
 RUNS = (('cu_fp16', 'cu', 'fp16', 'cuda'), ('cu_fp32', 'cu', 'none', 'cuda'), ('cu_cpu', 'cu', 'none', 'cpu'),
         ('moi_fp32', 'moi', 'none', 'cuda'), ('moi_fp16', 'moi', 'fp16', 'cuda'), ('moi_cpu', 'moi', 'none', 'cpu'))
 STATS = (('cu fp16 vs fp32', 'cu_fp32', 'cu_fp16'), ('nen: moi fp16 vs fp32', 'moi_fp32', 'moi_fp16'), ('cu GPU vs CPU fp32', 'cu_cpu', 'cu_fp32'),

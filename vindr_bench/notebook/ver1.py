@@ -28,7 +28,7 @@ FOLDER = 'stage4_nb89'
 DRIVE_NAMES = ('kiem_ke', 'tai', 'xung_dot', 'ghi', 'ghi_json', 'dong_bo', 'ten_tren_drive', 'tim_moi_noi', 'khoi_phuc_cho', 'luu_resume', 'cho_nho',
                'GHI_LOC', 'TEN_RESUME', 'RUN_TAG', '_duong', '_liet_ke')   # _duong / _liet_ke: tệp trọng số ngoài cxrlt_2024 (MIMIC_CXR/MRM, /CheXZero)
 THEIR_MODEL = ('chexfound',)          # Ver1: mô hình + bộ nạp của chính mã họ (không lớp bọc), như 86f
-NOT_VER1 = ('b',)                     # B: lớp bọc chưa kiểm trong môi trường thư viện của họ (tiến trình torchrun) -> chưa có notebook Ver1
+NOT_VER1 = ()                         # 0.8.0 (Tuấn 15/11 "build the code for running B in Ver 1 as plan"): B có Ver1 (khúc ô 64: protocols/chexfound_env.BUILD_KW)
 HEADS_V1 = {'chexfound': ('lin1', 'mldec')}   # CheXFound: Linear-4 + GLoRI dùng lại 86f sau cổng PLAN_89 §4.3 (bảng gộp, bước 5)
 WEIGHTS_PLACEHOLDER = 'khong_dung__lop_boc_thay_mo_hinh'      # --pretrained-weights: lớp bọc thay setup_and_build_model -> mã họ không đọc
 PAPER_HEAD = {'lin4': 'Linear', 'glori': 'GLoRI'}               # cột Bảng IV CheXFound tương ứng (linear probing của họ = 4 tầng cuối)
@@ -95,8 +95,8 @@ def gate(ctx, log=print):
     cfg = E.fetch_config(d['kiem_ke'], d['tai'], d['xung_dot'], log=log)
     ctx['tep_trong_so'] = W.fetch(spec, d, log=log) if spec.drive_dir else None
     if ctx['tep_trong_so']:
-        t = ctx['tep_trong_so']
-        log(f"trong so tu Drive: {spec.drive_dir}/{t['tep']} | md5 {t['md5']} = ghim | {t['byte']:,} B | {t['so_ban']} ban tren Drive")
+        for t in [ctx['tep_trong_so']] + list(ctx['tep_trong_so'].get('phu', [])):       # tệp chính + tệp phụ (B: backbone_ft.pt = cấu hình)
+            log(f"trong so tu Drive: {spec.drive_dir}/{t['tep']} | md5 {t['md5']} = ghim | {t['byte']:,} B | {t['so_ban']} ban tren Drive")
     theirs = ctx['mo_hinh_cua_ho']
     ctx['run'] = R.Ver1Run(env=ctx['env'], encoder=None if theirs else ctx['encoder'], image_size=spec.image_size, csv_root=ctx['csv'],
                            config_path=cfg, weights_path=W.weights_path(spec) if theirs else WEIGHTS_PLACEHOLDER, out_root=ctx['out'])

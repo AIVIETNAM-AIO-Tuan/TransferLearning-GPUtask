@@ -9,3 +9,9 @@
     runner.py        một lượt học / một loại đầu (lưới 9 lr; 5 + 4 cho GLoRI và ML-Decoder), cổng lần chấm, chạy thử, lưu / khôi phục
 
 Không import gì ở đây (launch.py / dataset.py / probe_features.py chạy trong Python 3.9 của môi trường họ)."""
+
+# Tham số dựng lớp bọc RIÊNG cho Ver1, dùng CHUNG ở tiến trình học (launch.inject_encoder) và mọi tiến trình đo đặc trưng của cổng số học (probe_features)
+# — hai nơi phải dựng cùng một lớp bọc. B: 5 ô cắt / ảnh qua block 0..7 theo khúc 64 ô thay 240 của lượt học (attention eager fp16 của transformers
+# 4.36.2 giữ điểm + softmax fp32 + bản fp16 ~ 8 B / phần tử: 240 ô ~ 40 GiB một tầng, 64 ô ~ 11 GiB = khúc 64 ảnh của RAD-DINO Ver1 đã chạy). Mỗi ô tính
+# độc lập -> phép tính không đổi (tests/test_b.py: khúc 64 = khúc 240 trên tệp thật).
+BUILD_KW = {'b': {'khuc': 64}}

@@ -41,7 +41,9 @@ def _with(prefix, sd):
 class B(EncoderWrapper):
     n_prefix = 1
 
-    def __init__(self, input_mean=IMAGENET_MEAN, input_std=IMAGENET_STD, path=None, cfg_path=None, attn=None, view='frontal', revision=REVISION):
+    def __init__(self, input_mean=IMAGENET_MEAN, input_std=IMAGENET_STD, path=None, cfg_path=None, attn=None, view='frontal', revision=REVISION, khuc=None):
+        '''khuc: số ô cắt mỗi lần qua block 0..7 (None = cfg_o['khuc'] = 240 của lượt học). Mỗi ô tính độc lập -> đổi khúc KHÔNG đổi phép tính, chỉ đổi đỉnh
+           bộ nhớ (Ver1: attention eager fp16 ở transformers 4.36.2 -> protocols/chexfound_env.BUILD_KW đặt 64).'''
         spec = SPECS['b']
         super().__init__(spec, input_mean, input_std)
         import transformers
@@ -95,7 +97,9 @@ class B(EncoderWrapper):
         self.luong.load_state_dict(ck['luong'], strict=True)
         self.bo_o7.load_state_dict(ck['bo_o7'], strict=True)
         self.dua_o.load_state_dict(ck['dua_o'], strict=True)
-        self.k_skip, self.khuc, self.n_o = int(co['k_skip']), int(co['khuc']), int(co['n_o'])
+        self.k_skip, self.n_o, self.khuc_cau_hinh = int(co['k_skip']), int(co['n_o']), int(co['khuc'])
+        self.khuc = self.khuc_cau_hinh if khuc is None else int(khuc)
+        assert self.khuc >= 1, f'B: khuc o {khuc!r} khong hop le -> DUNG'
         L = len(self.model.encoder.layer)
         assert (self.luong.R, tuple(self.luong.tang), float(cv3['ghi_nguoc_g']), float(cv3b['tran_ghi_rho'])) == (
             EXPECT['R'], EXPECT['tang'], EXPECT['g'], EXPECT['rho']) and n_g == n_t == len(self.luong.tang), (
@@ -121,7 +125,8 @@ class B(EncoderWrapper):
                                   attention=used, lech_rad_dino_goc=lech_pre, trong_so=cd4.get('trong_so'),
                                   ema=({k: ema.get(k) for k in ('n', 'he_so', 'trong_so')} if isinstance(ema, dict) else None),
                                   luong=dict(R=self.luong.R, tang=list(self.luong.tang), g=float(cv3['ghi_nguoc_g']), rho=float(cv3b['tran_ghi_rho']),
-                                             neo=self.neo, view_neo=str(cv2['view_neo'])), skip=dict(n_o=self.n_o, k_skip=self.k_skip, khuc=self.khuc),
+                                             neo=self.neo, view_neo=str(cv2['view_neo'])),
+                                  skip=dict(n_o=self.n_o, k_skip=self.k_skip, khuc=self.khuc, khuc_cau_hinh=self.khuc_cau_hinh),
                                   khoa_khong_dung=sorted(k for k in ck if k not in PARTS))
         self.train_log = ck.get('log')                                 # nhật ký huấn luyện (tỉ lệ ghi ngược từng lớp ở ep cuối: cổng của bộ kiểm)
         del ck, cfj
@@ -148,5 +153,5 @@ class B(EncoderWrapper):
         return [m.layernorm(o) for o in outs[-n:]]
 
 
-def build(input_mean=IMAGENET_MEAN, input_std=IMAGENET_STD, path=None, cfg_path=None, attn=None):
-    return B(input_mean, input_std, path=path, cfg_path=cfg_path, attn=attn).eval()
+def build(input_mean=IMAGENET_MEAN, input_std=IMAGENET_STD, path=None, cfg_path=None, attn=None, khuc=None):
+    return B(input_mean, input_std, path=path, cfg_path=cfg_path, attn=attn, khuc=khuc).eval()

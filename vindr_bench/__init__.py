@@ -17,8 +17,8 @@ Module 86 (`vindr_protocol`) giữ nguyên làm hồ sơ các notebook đã ch�
     evaluation/               metrics.py (ngữ nghĩa torchmetrics 0.10.3, AUPRC hình thang, bootstrap trọng số) · panels.py (28 / 27 / 21 / 7) ·
                               collect.py (gom lượt Ver1 / Ver2 từ Drive) · compare.py (ô, hiệu ghép cặp, max-T) · figures.py (biểu đồ 28 nhãn)
     notebook/                 ver1.py · ver2.py · summary.py (notebook tổng hợp): một hàm cho mỗi ô của notebook
-    (bước sau)                kho cắt giữa, Ver1 của B
+    (bước sau)                kho cắt giữa
 
 Gói không chứa ID Drive, không chứa dữ liệu. Phần chạy trong tiến trình của họ (encoders, heads/mldecoder, protocols/chexfound_env/{launch, dataset,
 probe_features}) chỉ dùng cú pháp / API có ở Python 3.9 + torch 2.0; protocols/ours + notebook/ver2 chỉ chạy ở Python của notebook."""
-__version__ = '0.7.0'          # 0.7.0 (15/11): hinh cua 89t = 28 nhan (AP bac thang, AUROC, AUPRC hinh thang; diem, khong CI), nhan tan xa khong chong; 0.6.0: B dong cung nhu moi backbone (encoders/b.py + b_src.py), 2 notebook Ver2 cua B
+__version__ = '0.8.0'          # 0.8.0 (15/11): Ver1 cua B (khuc o 64: protocols/chexfound_env.BUILD_KW; cong so hoc moi truong moi attention eager); 0.7.0: hinh cua 89t = 28 nhan (AP bac thang, AUROC, AUPRC hinh thang; diem, khong CI), nhan tan xa khong chong; 0.6.0: B dong cung nhu moi backbone (encoders/b.py + b_src.py), 2 notebook Ver2 cua B

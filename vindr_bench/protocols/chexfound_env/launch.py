@@ -110,12 +110,13 @@ def inject_encoder(linear_glori, name):
 
     from vindr_bench import encoders
     from vindr_bench.checks import weights
+    from vindr_bench.protocols.chexfound_env import BUILD_KW
     original = linear_glori.setup_and_build_model
 
     def setup_and_build_model(args):
         cudnn.benchmark = True                                   # như hàm gốc
         config = ev_setup.setup(args)
-        model = encoders.build(name, check=False)
+        model = encoders.build(name, check=False, **BUILD_KW.get(name, {}))     # = lớp bọc của cổng số học (probe_features)
         if _rank0():                                             # ghi TRƯỚC khi quyết (trượt vẫn để lại bằng chứng)
             with open(os.path.join(args.output_dir, NAP_FILE), 'w', encoding='utf-8') as f:
                 json.dump(model.nap, f, ensure_ascii=False, indent=1, default=str)

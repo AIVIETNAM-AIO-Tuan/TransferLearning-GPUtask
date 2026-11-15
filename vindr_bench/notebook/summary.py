@@ -74,9 +74,8 @@ def collect(ctx, log=print):
     log('--- kiem ke luot (so bo du doan test da tai) ---')
     for k, n in dl['co'].items():
         log(f"  {'CO   ' if n else 'THIEU'} {k}: {n} bo")
-    for m in dl['thieu']:
-        if not m.startswith('Ver1 b:'):                                  # B chưa có Ver1 (notebook/ver1.NOT_VER1)
-            log(f'  ! {m}')
+    for m in dl['thieu']:                                                # 0.8.0: B có Ver1 -> lượt Ver1 của B chưa chạy cũng được liệt kê
+        log(f'  ! {m}')
     k = dl['kiem_86f']
     if k:
         log(f"cong dung lai 86f (PLAN_89 4.3) cho CheXFound {k['co']}: nhan test theo thu tu = luot 89: {'TRUNG' if k['nhan_test_trung_89'] else 'KHAC'} | luoi du 9 lr "
