@@ -8,7 +8,7 @@ một phần kết quả: lượt thiếu được liệt kê, ô tương ứng 
     C5 tables   bảng từng điều kiện (ma trận encoder x đầu + bảng dài đủ điều kiện từng hàng) + Ver1 cạnh Ver2 (chỉ đặt cạnh, KHÔNG tính Ver2 - Ver1)
     C6 compare  hiệu ghép cặp: giữa encoder (từng đầu), giữa đầu đọc (từng encoder), giữa hai kho (Ver2), nhánh "theo AP" so với luật; họ so với hàng tham
                 chiếu + khoảng đồng thời max-T khi có hàng B
-    C7 figures  biểu đồ (evaluation/figures.py)
+    C7 figures  biểu đồ 28 nhãn — AP bậc thang, AUROC, AUPRC hình thang, điểm không CI (evaluation/figures.py; Tuấn 15/11: hình chỉ cần 28 nhãn)
     C8 sync     ghi JSON + CSV + PNG, dong_bo()
 
 Cách đọc (in kèm ở từng bảng): mAP21 = AP bậc thang macro 21 lớp (số của luật); AUPRC = hình thang; CI95 = bootstrap theo ảnh, DANH NGHĨA (chưa hiệu
@@ -287,29 +287,69 @@ def compare(ctx, log=print, reference=REFERENCE):
     return out
 
 
+def _note28(ctx):
+    '''Câu ghi chú chung của hình 28 nhãn, dựng từ DỮ LIỆU (không chép tên lớp cố định): lớp nào không có ca dương ở test -> bỏ khỏi AP / AUPRC, AUROC = 0.'''
+    names = list(ctx['dl']['nhan'])
+    miss = sorted({tuple(names[j] for j in range(len(names)) if j not in set(c['p27'])) for c in ctx['cot'].values()})
+    n_img = sorted({len(s.target) for s in ctx['dl']['sets']})
+    n = len(names)
+    if len(miss) == 1 and miss[0]:
+        m, k = list(miss[0]), n - len(miss[0])
+        cls = (f"{', '.join(m)} không có ca dương ở test -> AP và AUPRC là trung bình {k} nhãn có ca dương; AUROC tính {'lớp đó' if len(m) == 1 else 'các lớp đó'} "
+               f"= 0 (AUROC {n} = {k}/{n} x AUROC {k} nhãn, thứ hạng không đổi).")
+    elif len(miss) == 1:
+        cls = 'mọi nhãn có ca dương ở test.'
+    else:
+        cls = f"lớp không có ca dương KHÁC NHAU giữa các bộ nhãn test ({miss}) -> so giữa các bộ đó phải đọc thận trọng."
+    imgs = '/'.join(f'{v:,}'.replace(',', '.') for v in n_img)
+    return (f'{n} nhãn, ngữ nghĩa torchmetrics 0.10.3 (như Bảng IV CheXFound): {cls} Điểm trên cả test {imgs} ảnh; Ver2 = trung bình 5 hạt, Ver1 = một lượt '
+            f'hạt 0. Không vẽ khoảng tin cậy (bootstrap trên 28 nhãn không ổn vì lớp hiếm); CI và luật §7.4 ở bảng mAP21 (C5–C6).')
+
+
+def _gaps(order, flat, conds):
+    '''-> câu liệt kê (encoder, điều kiện) CHƯA có lượt nào (chấm / ô trống trên hình), hoặc ''.'''
+    g = [f'{SPECS[e].title} · {FAM_SHORT[c]}' for e in order for c in conds if not any((c[0], c[1], e, h) in flat for h in HEADS)]
+    return f" Chưa có lượt (chấm / ô trống): {'; '.join(g)}." if g else ''
+
+
 def figures(ctx, log=print, show=True):
-    '''C7. Vẽ + giữ Figure (ghi PNG ở C8). -> {tên: Figure}.'''
+    '''C7. Vẽ + giữ Figure (ghi PNG ở C8). Số vẽ = panel 28 nhãn — AP bậc thang, AUROC, AUPRC hình thang (điểm, không CI; Tuấn 15/11); bảng + luật vẫn ở
+       mAP21. -> {tên: Figure}.'''
     o = ctx['o']
     flat = {k[:4]: v for k, v in o.items() if k[4] == 'luat'}
     conds = [f for f in FAMS if _encs(ctx, f)]
     encs = [e for e in ORDER if any(k[2] == e for k in flat)]
-    order = sorted(encs, key=lambda e: -max(v['diem']['p21']['ap'] for k, v in flat.items() if k[2] == e))      # cùng thứ tự ở mọi ô hình
+    order = sorted(encs, key=lambda e: -max(v['diem'][FG.PANEL]['ap'] for k, v in flat.items() if k[2] == e))      # cùng thứ tự ở mọi hình
     et, ht = {e: SPECS[e].title for e in encs}, CL.TITLES
-    figs = dict(cham_mAP21=FG.dots(flat, order, HEADS, conds, et, ht, FAM_TITLE), luoi_mAP21=FG.heat(flat, order, HEADS, conds, et, ht, FAM_TITLE))
+    base = _note28(ctx)
+    note = base + _gaps(order, flat, conds)
+    figs = {}
+    for m in FG.METRICS:
+        figs[f'cham_28_{FG.SLUG[m]}'] = FG.dots(flat, order, HEADS, conds, m, et, ht, FAM_TITLE, note)
+    for m in FG.METRICS:
+        figs[f'luoi_28_{FG.SLUG[m]}'] = FG.heat(flat, order, HEADS, conds, m, et, ht, FAM_TITLE, note)
     if FAMS[0] in conds and FAMS[1] in conds:
-        figs['ver1_so_ver2'] = FG.versus(flat, order, HEADS, FAMS[0], FAMS[1], et, ht, FAM_TITLE)
-    for fam, table in ctx.get('cap', {}).items():
-        if table:
-            figs[f'hieu_giua_encoder_{fam[0]}_{fam[1]}'] = FG.pairs(table, [e for e in order if e in _encs(ctx, fam)], HEADS, et, ht,
-                                                                     f'Hiệu mAP 21 lớp giữa encoder (hàng − cột), ghép cặp theo ảnh — {FAM_TITLE[fam]}; số: ô đạt dạng luật (danh nghĩa)')
+        only = [et[e] for e in order if any(k[:2] == FAMS[1] and k[2] == e for k in flat) and not any(k[:2] == FAMS[0] and k[2] == e for k in flat)]
+        vs_note = base + (f" {', '.join(only)}: chưa có {FAM_SHORT[FAMS[0]]} nên không có trong hình." if only else '') + \
+            ' Chỉ đặt cạnh (khác mã, môi trường, lưới lr, số hạt, chế độ chấm) — không tính Ver2 − Ver1 (PLAN_89 §7.4).'
+        for m in FG.METRICS:
+            f = FG.versus(flat, order, HEADS, FAMS[0], FAMS[1], m, et, ht, FAM_TITLE, vs_note)
+            if f is not None:
+                figs[f'ver1_so_ver2_28_{FG.SLUG[m]}'] = f
+    for fam in conds:
+        f = FG.ref_diff(flat, REFERENCE, order, HEADS, fam, FG.METRICS, et, ht, FAM_TITLE,
+                        base + ' Hiệu điểm MÔ TẢ (cùng điều kiện, cùng đầu đọc; mỗi bên TB 5 hạt; "·" = không cùng bộ nhãn test hoặc chưa có lượt) — không có '
+                        'CI, không phải luật; luật §7.4 (họ B − X, khoảng đồng thời max-T) ở C6 trên mAP21.')
+        if f is not None:
+            figs[f'hieu_{REFERENCE}_tru_x_28_{fam[0]}_{fam[1]}'] = f
     for st in CL.V2_STORES:
         for metric, name in (('auc', 'AUROC'), ('ap', 'AP')):
             f = FG.lr_curves(ctx['dl']['duong_lr'], ctx['dl']['chon_v2'], order, HEADS, st, metric, et, ht,
-                             f'Ver2 · kho {st}: {name} val (lần chấm cuối pha 1, hạt 0) theo lr — chỗ chọn lr')
+                             f'Ver2 · kho {st}: {name} val 28 nhãn (lần chấm cuối pha 1, hạt 0) theo lr — chỗ chọn lr')
             if f is not None:
                 figs[f'do_lr_{metric}_{st}'] = f
     ctx['hinh'] = figs
-    log(f'{len(figs)} hinh: {sorted(figs)}')
+    log(f'{len(figs)} hinh (28 nhan: AP bac thang, AUROC, AUPRC hinh thang; diem, khong CI): {sorted(figs)}')
     if show:
         import matplotlib.pyplot as plt
         plt.show()
