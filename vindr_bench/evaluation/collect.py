@@ -13,14 +13,19 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..encoders.spec import SPECS
+from ..protocols import geometry as GEO
+
 FOLDER = 'stage4_nb89'
 HEADS = ('lin1', 'lin4', 'mldec', 'glori')
 TITLES = {'lin1': 'Linear-1', 'lin4': 'Linear-4', 'mldec': 'ML-Decoder', 'glori': 'GLoRI'}
-V1_TAGS = {'biomedclip': 'r89v1_biomedclip'}                 # lượt gói 0.2.0 (không chia khúc) — Tuấn 13/11; hàng khác: r89v1_<encoder>_k64
+V1_TAGS = {'biomedclip': 'r89v1_biomedclip'}                 # lượt gói 0.2.0 (không chia khúc) — Tuấn 13/11; hàng khác: r89v1_<encoder>_k64[hậu tố]
 V1_GRID = (1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3)        # lưới 9 lr của bài (Ver1)
 REUSE_86F = dict(encoder='chexfound', folder=('stage4_nb86f', 'r86f_chexfound_moi_truong_ho'), heads={'lin4': 'lin', 'glori': 'glori'})
-V2_STORES = ('kcb', 'cb')
-STORE_TEXT = {'kcb': 'dem vuong, KHONG can bang histogram', 'cb': 'dem vuong, CO can bang histogram'}
+V2_STORES = ('kcb', 'cb', GEO.CROP_STORE)
+STORE_TEXT = {'kcb': 'dem vuong, KHONG can bang histogram', 'cb': 'dem vuong, CO can bang histogram',
+              GEO.CROP_STORE: 'co canh ngan + CAT GIUA, KHONG can bang histogram'}
+STORE_ROWS = {GEO.CROP_STORE: GEO.ROWS}       # kho chỉ chạy cho một số hàng (phép thử hình học); kho khác: mọi hàng
 T = r'(\d{8}_\d{6})'
 
 
@@ -46,7 +51,17 @@ class PredSet:
 
 
 def v1_tag(encoder):
-    return V1_TAGS.get(encoder, f'r89v1_{encoder}_k64')
+    '''= notebook.ver1.run_tag (kể cả spec.run_suffix: PubMedCLIP chuẩn hoá ImageNet -> r89v1_pubmedclip_k64_imnet; lượt cũ không đọc).'''
+    return V1_TAGS.get(encoder, f"r89v1_{encoder}_k64{_suffix(encoder)}")
+
+
+def _suffix(encoder):
+    return getattr(SPECS.get(encoder), 'run_suffix', '')
+
+
+def v2_tag(encoder, store):
+    '''= notebook.ver2.run_tag (kể cả spec.run_suffix).'''
+    return f'r89v2_{encoder}_{store}{_suffix(encoder)}'
 
 
 def _read_json(path):
@@ -111,7 +126,7 @@ def load_86f(drive):
 
 def load_v2(drive, encoder, store):
     '''-> ([PredSet], (nhan, lop_chinh) | None, đường dò lr {đầu: [(lr, AUROC val cuối, AP val cuối)]}, bản chọn lr). Chưa có -> ([], None, {}, {}).'''
-    tag = f'r89v2_{encoder}_{store}'
+    tag = v2_tag(encoder, store)
     lab = re.escape(tag[1:])
     kk = drive['kiem_ke']((FOLDER, tag), mau=rf'(luot|du_doan)_{lab}_\d{{8}}_\d{{6}}\.(json|npz)')[1]
     pairs = _pairs(kk, rf'luot_({lab})_{T}\.json', rf'du_doan_({lab})_{T}\.npz')
@@ -168,11 +183,13 @@ def collect(drive, encoders, stores=V2_STORES, log=print):
             sets += s
     for e in encoders:
         for st in stores:
+            if e not in STORE_ROWS.get(st, (e,)):
+                continue                                                 # kho cắt giữa: chỉ 8 hàng của phép thử hình học (protocols/geometry.py)
             s, nm, cv, ch = load_v2(drive, e, st)
             names = names or nm
-            have[f'Ver2 {e} kho {st} (r89v2_{e}_{st})'] = len(s)
+            have[f'Ver2 {e} kho {st} ({v2_tag(e, st)})'] = len(s)
             if not s:
-                missing.append(f'Ver2 {e} kho {st}: chua co ket qua trong {FOLDER}/r89v2_{e}_{st}')
+                missing.append(f'Ver2 {e} kho {st}: chua co ket qua trong {FOLDER}/{v2_tag(e, st)}')
             sets += s
             if cv:
                 curves[(e, st)], chon[(e, st)] = cv, ch

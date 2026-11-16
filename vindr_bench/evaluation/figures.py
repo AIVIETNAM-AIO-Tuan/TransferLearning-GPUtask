@@ -12,7 +12,11 @@ Chọn dạng theo việc của dữ liệu; màu ĐÃ CHẠY bộ kiểm bảng
   - heat       lưới encoder x đầu đọc: bản đồ nhiệt MỘT sắc (xanh, nhạt -> đậm), có số trong ô (đây cũng là bảng)
   - versus     Ver1 so với Ver2 từng encoder: tán xạ một màu, đường y = x, Spearman ở tiêu đề ô; nhãn tên ĐẶT KHÔNG CHỒNG (_labels)
   - ref_diff   hiệu điểm hàng tham chiếu − X (mô tả, không CI): bản đồ nhiệt PHÂN KỲ đỏ <-> xám <-> xanh, số trong mọi ô
+  - cond_diff  hiệu điểm điều kiện a − điều kiện b của cùng encoder (0.9.0: kho cắt giữa − kho đệm vuông): cùng khuôn với ref_diff
   - lr_curves  số đo val theo lr: đường, 4 đầu = 4 màu theo thứ tự cố định (cặp kề nhau: đạt)
+  Điều kiện thứ tư (0.9.0, kho cắt giữa): KHÔNG thêm màu thứ tư vào `dots` — chấm của các điều kiện chồng lên nhau nên mọi cặp màu phải phân biệt, và ô màu thứ
+  tư (vàng cạnh cam) trượt sàn mọi cặp của bảng màu (dataviz palette.md) -> dots giữ 3 điều kiện; kho cắt giữa ở `heat` (mỗi điều kiện một ô, thang một sắc) và
+  ở `cond_diff`.
 Bố cục chung (_layout): tiêu đề trái-trên; DƯỚI các ô lần lượt chú giải / thang màu rồi ghi chú gói dòng — không chữ nào đè lên ô. Chữ màu mực; lưới mảnh;
 không viền trên / phải. Xanh ngọc và vàng dưới 3:1 trên nền sáng -> luôn kèm số (bảng C5, hình lưới)."""
 import textwrap
@@ -188,6 +192,7 @@ def _cond_handles(conds, cond_title):
 def dots(cells, encoders, heads, conds, metric, enc_title, head_title, cond_title, note=None, panel=PANEL):
     '''cells[(ver, kho, encoder, đầu)] = ô. Một ô hình mỗi đầu đọc; trục y = encoder (cùng thứ tự mọi ô và mọi hình); mỗi điều kiện một chấm (màu + hình);
        chấm = điểm trên cả test (Ver2: TB các hạt). Không khoảng tin cậy (xem docstring module).'''
+    assert all(c in COND for c in conds), f'dots: dieu kien {[c for c in conds if c not in COND]} khong co mau (toi da 3 dieu kien — docstring module)'
     plt = _plt()
     n = len(encoders)
     fig, axes = plt.subplots(1, len(heads), figsize=(2.55 * len(heads) + 1.4, 0.32 * n + 1.9), sharey=True, sharex=True, squeeze=False)
@@ -291,23 +296,14 @@ def versus(cells, encoders, heads, x_cond, y_cond, metric, enc_title, head_title
     return fig
 
 
-def ref_diff(cells, ref, encoders, heads, cond, metrics, enc_title, head_title, cond_title, note=None, panel=PANEL):
-    '''Hiệu điểm ref − X (cùng điều kiện, cùng đầu) cho từng số đo: mỗi số đo một ô, hàng = X, cột = đầu đọc; chỉ tính khi hai ô cùng bộ nhãn test theo thứ
-       tự ('·' = không tính được). Mô tả: không CI, không phải luật §7.4. -> Figure | None (chưa có ref hoặc không có X nào).'''
+def _diff_heat(rows, d, heads, metrics, row_title, head_title, title, cbar_label, note):
+    '''Bản đồ nhiệt PHÂN KỲ của hiệu d(hàng, đầu, số đo): mỗi số đo một ô, hàng = rows, cột = đầu đọc; số có dấu trong mọi ô ('·' = không tính được);
+       thang đối xứng quanh 0 chung cho mọi ô. Dùng chung cho ref_diff (B − X) và cond_diff (điều kiện a − điều kiện b).'''
     plt = _plt()
-
-    def d(x, h, m):
-        a, b = cells.get((cond[0], cond[1], ref, h)), cells.get((cond[0], cond[1], x, h))
-        if a is None or b is None or a.get('khoa_nhan') != b.get('khoa_nhan'):
-            return np.nan
-        return a['diem'][panel][m] - b['diem'][panel][m]
-    others = [x for x in encoders if x != ref and any(np.isfinite(d(x, h, METRICS[0])) for h in heads)]
-    if not others:
-        return None
-    D = {m: np.array([[d(x, h, m) for h in heads] for x in others]) for m in metrics}
+    D = {m: np.array([[d(x, h, m) for h in heads] for x in rows]) for m in metrics}
     fin = np.concatenate([np.abs(A[np.isfinite(A)]) for A in D.values()])
     vm = float(fin.max()) if fin.size and fin.max() > 0 else 0.05
-    fig, axes = plt.subplots(1, len(metrics), figsize=(2.85 * len(metrics) + 1.5, 0.33 * len(others) + 2.15), sharey=True, squeeze=False)
+    fig, axes = plt.subplots(1, len(metrics), figsize=(2.85 * len(metrics) + 1.5, 0.33 * len(rows) + 2.15), sharey=True, squeeze=False)
     axes = axes[0]
     cm = _cmap(DIV, 'phan_ky')
     im = None
@@ -322,17 +318,49 @@ def ref_diff(cells, ref, encoders, heads, cond, metrics, enc_title, head_title, 
                     ax.text(j, i, '·', ha='center', va='center', fontsize=FS['cell'], color=MUTED)
         ax.set_xticks(range(len(heads)))
         ax.set_xticklabels([head_title[h] for h in heads])
-        ax.set_yticks(range(len(others)))
-        ax.set_yticklabels([enc_title[x] for x in others])
+        ax.set_yticks(range(len(rows)))
+        ax.set_yticklabels([row_title[x] for x in rows])
         ax.set_xticks(np.arange(0.5, len(heads) - 1, 1), minor=True)
-        ax.set_yticks(np.arange(0.5, len(others) - 1, 1), minor=True)
+        ax.set_yticks(np.arange(0.5, len(rows) - 1, 1), minor=True)
         ax.set_xlim(-0.5, len(heads) - 0.5)
-        ax.set_ylim(len(others) - 0.5, -0.5)
+        ax.set_ylim(len(rows) - 0.5, -0.5)
         ax.set_title(METRIC_SHORT[m], loc='left')
         _bare(ax)
-    _layout(fig, f'Hiệu điểm {enc_title[ref]} − X trên 28 nhãn — {cond_title[cond]} (mỗi hàng một X, cùng đầu đọc)', note,
-            cbar=(im, f'{enc_title[ref]} − X (xanh: {enc_title[ref]} cao hơn)'))
+    _layout(fig, title, note, cbar=(im, cbar_label))
     return fig
+
+
+def ref_diff(cells, ref, encoders, heads, cond, metrics, enc_title, head_title, cond_title, note=None, panel=PANEL):
+    '''Hiệu điểm ref − X (cùng điều kiện, cùng đầu) cho từng số đo: mỗi số đo một ô, hàng = X, cột = đầu đọc; chỉ tính khi hai ô cùng bộ nhãn test theo thứ
+       tự ('·' = không tính được). Mô tả: không CI, không phải luật §7.4. -> Figure | None (chưa có ref hoặc không có X nào).'''
+    def d(x, h, m):
+        a, b = cells.get((cond[0], cond[1], ref, h)), cells.get((cond[0], cond[1], x, h))
+        if a is None or b is None or a.get('khoa_nhan') != b.get('khoa_nhan'):
+            return np.nan
+        return a['diem'][panel][m] - b['diem'][panel][m]
+    others = [x for x in encoders if x != ref and any(np.isfinite(d(x, h, METRICS[0])) for h in heads)]
+    if not others:
+        return None
+    return _diff_heat(others, d, heads, metrics, enc_title, head_title,
+                      f'Hiệu điểm {enc_title[ref]} − X trên 28 nhãn — {cond_title[cond]} (mỗi hàng một X, cùng đầu đọc)',
+                      f'{enc_title[ref]} − X (xanh: {enc_title[ref]} cao hơn)', note)
+
+
+def cond_diff(cells, encoders, heads, cond_a, cond_b, metrics, enc_title, head_title, short_a, short_b, note=None, panel=PANEL):
+    '''Hiệu điểm cond_a − cond_b của CÙNG encoder, cùng đầu (vd kho cắt giữa − kho đệm vuông, PLAN_89 §5.3): mỗi số đo một ô, hàng = encoder có cả hai
+       điều kiện; chỉ tính khi hai ô cùng bộ nhãn test theo thứ tự ('·' = không tính được). Hai lượt học riêng, mỗi bên TB các hạt -> MÔ TẢ (không CI;
+       luật của họ hình học ở bảng mAP21). short_a / short_b: tên ngắn của hai điều kiện cho tiêu đề + thang màu. -> Figure | None.'''
+    def d(x, h, m):
+        a, b = cells.get((cond_a[0], cond_a[1], x, h)), cells.get((cond_b[0], cond_b[1], x, h))
+        if a is None or b is None or a.get('khoa_nhan') != b.get('khoa_nhan'):
+            return np.nan
+        return a['diem'][panel][m] - b['diem'][panel][m]
+    rows = [x for x in encoders if any(np.isfinite(d(x, h, METRICS[0])) for h in heads)]
+    if not rows:
+        return None
+    return _diff_heat(rows, d, heads, metrics, enc_title, head_title,
+                      f'Hiệu điểm {short_a} − {short_b} trên 28 nhãn — cùng encoder, cùng đầu đọc (mỗi hàng một encoder)',
+                      f'{short_a} − {short_b} (xanh: {short_a} cao hơn)', note)
 
 
 def lr_curves(curves, chosen, encoders, heads, store, metric, enc_title, head_title, title, note=None):

@@ -161,19 +161,50 @@ def diff(a, b):
     return dict(d=float(d), ci=ci, nua=nua, rut=r, se=float(ok.std(ddof=1)) if len(ok) > 1 else float('nan'), ket_luan=verdict(d, ci[0], ci[1], nua))
 
 
-def max_t(diffs, level=95.0):
-    '''Khoảng đồng thời cho một họ phép so (list kết quả diff). -> (q, [dict(d, ci_dong_thoi, ket_luan)]) theo đúng thứ tự vào.'''
+def verdict_delta(d, lo, hi, nua=None, margin=MARGIN):
+    '''Luật (a) của họ hình học (PLAN_89 §7.4) trên Δ = cắt giữa − đệm vuông: 'te di nhieu' = Δ <= −0,01 VÀ cận trên < 0; 'khong te di' = cận dưới >
+       −0,01; còn lại 'chua ket luan'. (Không dùng hai nửa — luật đặt trước không có.)'''
+    if d <= -margin and hi < 0: return 'te di nhieu'
+    if lo > -margin: return 'khong te di'
+    return 'chua ket luan'
+
+
+def verdict_interaction(d, lo, hi, nua=None):
+    '''Luật (b) của họ hình học trên Δ_B − Δ_X: < 0 với cận trên < 0 -> 'dem vuong nghieng ve B' (B mất nhiều hơn / được ít hơn X khi bỏ đệm vuông); > 0 với
+       cận dưới > 0 -> 'dem vuong nghieng ve X'; còn lại 'khong phan biet'.'''
+    if d < 0 and hi < 0: return 'dem vuong nghieng ve B'
+    if d > 0 and lo > 0: return 'dem vuong nghieng ve X'
+    return 'khong phan biet'
+
+
+def diff_of_diffs(a1, a0, b1, b0):
+    '''Hiệu của hai hiệu ghép cặp trên mAP21: (A1 − A0) − (B1 − B0) trên cùng lần rút (vd Δ_B − Δ_X của họ hình học). Mọi ô phải cùng nhãn test theo thứ tự
+       (bên gọi kiểm). -> dict cùng khuôn với diff (ket_luan = luật (b), danh nghĩa).'''
+    d = (a1['diem']['p21']['ap'] - a0['diem']['p21']['ap']) - (b1['diem']['p21']['ap'] - b0['diem']['p21']['ap'])
+    r = (a1['m21'] - a0['m21']) - (b1['m21'] - b0['m21'])
+    ci = _ci(r)
+    nua = [(a1['nua'][h] - a0['nua'][h]) - (b1['nua'][h] - b0['nua'][h]) for h in (0, 1)]
+    ok = r[np.isfinite(r)]
+    return dict(d=float(d), ci=ci, nua=nua, rut=r, se=float(ok.std(ddof=1)) if len(ok) > 1 else float('nan'),
+                ket_luan=verdict_interaction(d, ci[0], ci[1]))
+
+
+def max_t(diffs, level=95.0, rules=None):
+    '''Khoảng đồng thời cho một họ phép so (list kết quả diff / diff_of_diffs). rules: None (luật B − X §7.4 cho mọi phép) hoặc list hàm luật
+       (d, cận dưới, cận trên, hai nửa) -> nhãn, cùng thứ tự diffs (họ hình học trộn ba dạng luật). -> (q, [dict(d, ci_dong_thoi, ket_luan)]).'''
     if not diffs:
         return float('nan'), []
+    rules = rules or [verdict] * len(diffs)
+    assert len(rules) == len(diffs), 'max_t: so luat khac so phep so'
     R = np.stack([x['rut'] for x in diffs])
     R = R[:, np.isfinite(R).all(0)]
     d = np.array([x['d'] for x in diffs])
     se = R.std(1, ddof=1)
     q = float(np.percentile(np.max(np.abs(R - d[:, None]) / se[:, None], 0), level))
     out = []
-    for x, dc, s in zip(diffs, d, se):
+    for x, dc, s, rule in zip(diffs, d, se, rules):
         lo, hi = float(dc - q * s), float(dc + q * s)
-        out.append(dict(d=float(dc), ci_dong_thoi=[lo, hi], ket_luan=verdict(dc, lo, hi, x['nua'])))
+        out.append(dict(d=float(dc), ci_dong_thoi=[lo, hi], ket_luan=rule(dc, lo, hi, x['nua'])))
     return q, out
 
 

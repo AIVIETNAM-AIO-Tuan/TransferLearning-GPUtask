@@ -7,8 +7,10 @@ một phần kết quả: lượt thiếu được liệt kê, ô tương ứng 
     C4 score    điểm 4 panel + bootstrap 2.000 lần theo ảnh (cùng dãy rút cho mọi lượt -> ghép cặp) -> ô (Ver2: TB 5 hạt)
     C5 tables   bảng từng điều kiện (ma trận encoder x đầu + bảng dài đủ điều kiện từng hàng) + Ver1 cạnh Ver2 (chỉ đặt cạnh, KHÔNG tính Ver2 - Ver1)
     C6 compare  hiệu ghép cặp: giữa encoder (từng đầu), giữa đầu đọc (từng encoder), giữa hai kho (Ver2), nhánh "theo AP" so với luật; họ so với hàng tham
-                chiếu + khoảng đồng thời max-T khi có hàng B
-    C7 figures  biểu đồ 28 nhãn — AP bậc thang, AUROC, AUPRC hình thang, điểm không CI (evaluation/figures.py; Tuấn 15/11: hình chỉ cần 28 nhãn)
+                chiếu + khoảng đồng thời max-T khi có hàng B; 0.9.0: hai họ HÌNH HỌC (kho cắt giữa − kho đệm vuông; 28 phép khoá 13/11 + 60 phép mở rộng
+                16/11 — protocols/geometry.py), mỗi họ max-T riêng khi đủ phép
+    C7 figures  biểu đồ 28 nhãn — AP bậc thang, AUROC, AUPRC hình thang, điểm không CI (evaluation/figures.py; Tuấn 15/11: hình chỉ cần 28 nhãn); kho cắt
+                giữa: ô thứ tư của hình lưới + hình hiệu cắt giữa − đệm vuông (hình chấm giữ 3 điều kiện — màu)
     C8 sync     ghi JSON + CSV + PNG, dong_bo()
 
 Cách đọc (in kèm ở từng bảng): mAP21 = AP bậc thang macro 21 lớp (số của luật); AUPRC = hình thang; CI95 = bootstrap theo ảnh, DANH NGHĨA (chưa hiệu
@@ -27,18 +29,25 @@ from ..evaluation import collect as CL
 from ..evaluation import compare as CP
 from ..evaluation import figures as FG
 from ..evaluation import panels as P
+from ..protocols import geometry as GEO
 
 DRIVE_NAMES = ('kiem_ke', 'tai', 'xung_dot', 'ghi', 'ghi_json', 'dong_bo', 'ten_tren_drive', 'RUN_TAG', 'GHI_LOC')
 RUN_TAG = 'r89t_tong_hop'
 HEADS = CL.HEADS
-FAMS = (('v1', 'kcb'), ('v2', 'kcb'), ('v2', 'cb'))
+GEO_FAM, PAD_FAM = ('v2', GEO.CROP_STORE), ('v2', GEO.PAD_STORE)      # phép thử hình học (PLAN_89 §5.3): cắt giữa so với đệm vuông, cùng kiểu histogram
+FAMS = (('v1', 'kcb'), ('v2', 'kcb'), ('v2', 'cb'), GEO_FAM)
+RULE_FAMS = FAMS[:3]                 # ba họ "B − X" 32 phép của luật §7.4; B − X trên kho cắt giữa thuộc họ hình học (phần (c))
 FAM_TEXT = {('v1', 'kcb'): 'Ver1 = ma + moi truong CheXFound (A100) | kho dem vuong KHONG can bang | luoi 9 lr | 1 luot hat 0 | dropout BAT khi cham',
             ('v2', 'kcb'): 'Ver2 = ma + moi truong cua ta (G4) | kho dem vuong KHONG can bang | luoi 13 lr | TB 5 hat | dau doc eval() khi cham',
-            ('v2', 'cb'): 'Ver2 = ma + moi truong cua ta (G4) | kho dem vuong CO can bang histogram | luoi 13 lr | TB 5 hat | dau doc eval() khi cham'}
-FAM_SHORT = {('v1', 'kcb'): 'Ver1 kcb', ('v2', 'kcb'): 'Ver2 kcb', ('v2', 'cb'): 'Ver2 cb'}
-FAM_TITLE = {('v1', 'kcb'): 'Ver1 · đệm vuông, không cân bằng', ('v2', 'kcb'): 'Ver2 · đệm vuông, không cân bằng', ('v2', 'cb'): 'Ver2 · đệm vuông, có cân bằng'}
+            ('v2', 'cb'): 'Ver2 = ma + moi truong cua ta (G4) | kho dem vuong CO can bang histogram | luoi 13 lr | TB 5 hat | dau doc eval() khi cham',
+            GEO_FAM: ('Ver2 = ma + moi truong cua ta (G4) | kho CAT GIUA (co canh ngan + cat giua) KHONG can bang | luoi 13 lr | TB 5 hat | dau doc eval() '
+                      'khi cham | chi 8 hang cua phep thu hinh hoc')}
+FAM_SHORT = {('v1', 'kcb'): 'Ver1 kcb', ('v2', 'kcb'): 'Ver2 kcb', ('v2', 'cb'): 'Ver2 cb', GEO_FAM: 'Ver2 cg_kcb'}
+FAM_TITLE = {('v1', 'kcb'): 'Ver1 · đệm vuông, không cân bằng', ('v2', 'kcb'): 'Ver2 · đệm vuông, không cân bằng', ('v2', 'cb'): 'Ver2 · đệm vuông, có cân bằng',
+             GEO_FAM: 'Ver2 · cắt giữa, không cân bằng'}
 HEAD_PAIRS = (('lin4', 'lin1'), ('mldec', 'lin4'), ('glori', 'lin4'), ('glori', 'mldec'))
 REFERENCE = 'b'                      # hàng tham chiếu của luật §7.4 (B - X); chưa có B -> chỉ có hiệu danh nghĩa
+assert REFERENCE == GEO.REFERENCE
 
 
 def _f(x, nd=3):
@@ -191,7 +200,7 @@ def tables(ctx, log=print):
         for e in [e for e in ORDER if any(e in val[f] for f in FAMS)]:
             log(f"{'':<4}{SPECS[e].title + ' ' + str(SPECS[e].image_size):<28}" + ''.join(f'{_f(val[f].get(e)):>12}{rank[f].get(e, "-"):>9}' for f in FAMS))
         sp = {}
-        for a, b in ((FAMS[0], FAMS[1]), (FAMS[1], FAMS[2])):
+        for a, b in ((FAMS[0], FAMS[1]), (FAMS[1], FAMS[2]), (PAD_FAM, GEO_FAM)):
             common = [e for e in val[a] if e in val[b]]
             sp[f'{FAM_SHORT[a]} ~ {FAM_SHORT[b]}'] = (CP.spearman([val[a][e] for e in common], [val[b][e] for e in common]), len(common))
         log(f"{'':<4}tuong quan hang (Spearman, mo ta): " + ' | '.join(f'{k}: {_f(v[0], 2)} ({v[1]} encoder)' for k, v in sp.items()))
@@ -230,7 +239,9 @@ def compare(ctx, log=print, reference=REFERENCE):
                 log(line)
         out['giua_encoder'][FAM_SHORT[fam]] = {f'{h}|{a}|{b}': dict(hieu=r['d'], ci=r['ci'], nua=r['nua'], dang_luat_danh_nghia=r['ket_luan']) for (h, a, b), r in table.items()}
         ctx.setdefault('cap', {})[fam] = table
-        if reference in encs:
+        if fam == GEO_FAM:
+            log(f'--- {SPECS[reference].title} - X tren kho cat giua: LUAT o phan (c) cua hai ho hinh hoc (cuoi C6), khong lap ho 32 phep o day ---')
+        elif reference in encs:
             comps = [(h, x) for h in HEADS for x in encs if x != reference and (h, reference, x) in table]
             q, sim = CP.max_t([table[(h, reference, x)] for h, x in comps])
             log(f'--- HO {len(comps)} phep so {SPECS[reference].title} - X (luat PLAN_89 7.4), khoang DONG THOI max-T 95 %: q = {q:.2f} ---')
@@ -282,7 +293,66 @@ def compare(ctx, log=print, reference=REFERENCE):
                     f"(mAP21 {_f(b['diem']['p21']['ap'])}) = {_d(r['d'])} [{_d(r['ci'][0])}, {_d(r['ci'][1])}]")
     if not out['nhanh_ap']:
         log('    khong co o nao (chua co luot Ver2, hoac hai tieu chi chon cung lr o moi o)')
+    out['hinh_hoc'] = geometry(ctx, cell, log)
     ctx['so_sanh'] = out
+    return out
+
+
+def _per_seed(*pairs):
+    '''Δ từng hạt (cùng chỉ số hạt ở mọi ô): pairs = [(dấu, ô)] -> [tổng dấu x AP21 của hạt k] cho các hạt có ở MỌI ô (hai lượt học riêng ghép theo hạt).'''
+    common = sorted(set.intersection(*[set(c['hat']) for _, c in pairs]))
+    return [float(sum(s * dict(zip(c['hat'], c['tung_hat']))[k] for s, c in pairs)) for k in common]
+
+
+def geometry(ctx, cell, log=print):
+    '''Hai họ phép thử hình học (PLAN_89 §5.3, §7.4; protocols/geometry.py): mỗi họ ĐỦ phép -> khoảng đồng thời max-T 95 % riêng của họ + luật từng dạng;
+       chưa đủ -> chỉ hiệu danh nghĩa, "chưa áp luật". Δ = mAP21 kho cắt giữa − kho đệm vuông KHÔNG cân bằng (cùng encoder, cùng đầu, Ver2); kèm Δ từng hạt.'''
+    out = {}
+    log('\n=== HINH HOC (PLAN_89 5.3 / 7.4): Δ = mAP21(kho CAT GIUA) - mAP21(kho DEM VUONG, cung KHONG can bang), cung encoder, cung dau, Ver2 (hai luot hoc '
+        'rieng, moi ben TB 5 hat -> CI theo anh THIEU bien thien huan luyen; Δ tung hat in kem). Luat: (a) Δ "te di nhieu" = Δ <= -0,01 VA can tren dong '
+        'thoi < 0, "khong te di" = can duoi dong thoi > -0,01; (b) Δ_B - Δ_X < 0 voi can tren < 0 -> dem vuong nghieng ve B, > 0 voi can duoi > 0 -> nghieng '
+        've X; (c) B - X tren kho cat giua theo luat ho 32 ===')
+    ref = GEO.REFERENCE
+    for name, fam in GEO.FAMILIES.items():
+        rows, items, need = fam['rows'], [], 0
+        for h in HEADS:                                                             # (a) Δ_E
+            for e in rows:
+                need += 1
+                a1, a0 = cell(GEO_FAM, e, h), cell(PAD_FAM, e, h)
+                if _pair_ok(a1, a0):
+                    items.append(('a', h, e, CP.diff(a1, a0), CP.verdict_delta, _per_seed((1, a1), (-1, a0))))
+        for h in HEADS:                                                             # (b) Δ_B − Δ_X
+            for x in rows:
+                if x == ref:
+                    continue
+                need += 1
+                b1, b0, x1, x0 = cell(GEO_FAM, ref, h), cell(PAD_FAM, ref, h), cell(GEO_FAM, x, h), cell(PAD_FAM, x, h)
+                if all(_pair_ok(b1, c) for c in (b0, x1, x0)):
+                    items.append(('b', h, x, CP.diff_of_diffs(b1, b0, x1, x0), CP.verdict_interaction, _per_seed((1, b1), (-1, b0), (-1, x1), (1, x0))))
+        for h in HEADS:                                                             # (c) B − X trên kho cắt giữa
+            for x in rows:
+                if x == ref:
+                    continue
+                need += 1
+                b1, x1 = cell(GEO_FAM, ref, h), cell(GEO_FAM, x, h)
+                if _pair_ok(b1, x1):
+                    items.append(('c', h, x, CP.diff(b1, x1), CP.verdict, _per_seed((1, b1), (-1, x1))))
+        full = bool(items) and len(items) == need
+        log(f"\n--- {fam['title']} | {len(items)} / {need} phep so co du lieu"
+            + (' -> khoang DONG THOI max-T 95 % cua ho' if full else ' -> HO CHUA DU: chi hieu DANH NGHIA, CHUA ap luat ---'))
+        q, sim = CP.max_t([it[3] for it in items], rules=[it[4] for it in items]) if full else (float('nan'), [None] * len(items))
+        if full:
+            log(f'    q = {q:.2f} (ho {need} phep)')
+        dang = {'a': '(a) Δ', 'b': f'(b) Δ_{SPECS[ref].title} - Δ_X', 'c': f'(c) {SPECS[ref].title} - X cat giua'}
+        rec = []
+        for (kind, h, x, r, rule, seeds), s in zip(items, sim):
+            ci_s = s['ci_dong_thoi'] if s else None
+            lab = s['ket_luan'] if s else f"danh nghia: {rule(r['d'], r['ci'][0], r['ci'][1], r['nua'])}"
+            log(f"    {dang[kind]:<22}{CL.TITLES[h]:<11}{SPECS[x].title:<22}{_d(r['d'])}"
+                + (f" dong thoi [{_d(ci_s[0])}, {_d(ci_s[1])}]" if ci_s else '') + f" | danh nghia [{_d(r['ci'][0])}, {_d(r['ci'][1])}] | hai nua "
+                f"{_d(r['nua'][0])} / {_d(r['nua'][1])} | tung hat {' '.join(_d(v) for v in seeds)} -> {lab}")
+            rec.append(dict(dang=kind, dau=h, encoder=x, d=r['d'], ci_danh_nghia=r['ci'], ci_dong_thoi=ci_s, ket_luan=lab, nua=r['nua'], tung_hat=seeds))
+        out[name] = dict(tieu_de=fam['title'], so_phep=need, co=len(items), day_du=full, q=q if full else None, phep_so=rec)
     return out
 
 
@@ -305,10 +375,17 @@ def _note28(ctx):
             f'hạt 0. Không vẽ khoảng tin cậy (bootstrap trên 28 nhãn không ổn vì lớp hiếm); CI và luật §7.4 ở bảng mAP21 (C5–C6).')
 
 
+def _expected(e, c):
+    '''Hàng e có phải chạy ở điều kiện c không (kho cắt giữa: chỉ 8 hàng của phép thử hình học).'''
+    return e in CL.STORE_ROWS.get(c[1], (e,)) if c[0] == 'v2' else True
+
+
 def _gaps(order, flat, conds):
-    '''-> câu liệt kê (encoder, điều kiện) CHƯA có lượt nào (chấm / ô trống trên hình), hoặc ''.'''
-    g = [f'{SPECS[e].title} · {FAM_SHORT[c]}' for e in order for c in conds if not any((c[0], c[1], e, h) in flat for h in HEADS)]
-    return f" Chưa có lượt (chấm / ô trống): {'; '.join(g)}." if g else ''
+    '''-> câu liệt kê (encoder, điều kiện) CHƯA có lượt nào (chấm / ô trống trên hình), hoặc ''. Hàng không thuộc điều kiện (CheXzero ở kho cắt giữa) ghi riêng.'''
+    g = [f'{SPECS[e].title} · {FAM_SHORT[c]}' for e in order for c in conds if _expected(e, c) and not any((c[0], c[1], e, h) in flat for h in HEADS)]
+    skip = [SPECS[e].title for e in order if GEO_FAM in conds and not _expected(e, GEO_FAM)]
+    return ((f" Chưa có lượt (chấm / ô trống): {'; '.join(g)}." if g else '')
+            + (f" {', '.join(skip)}: không chạy kho cắt giữa (tiền xử lý gốc = đệm vuông, PLAN_89 §5.3)." if skip else ''))
 
 
 def figures(ctx, log=print, show=True):
@@ -317,6 +394,7 @@ def figures(ctx, log=print, show=True):
     o = ctx['o']
     flat = {k[:4]: v for k, v in o.items() if k[4] == 'luat'}
     conds = [f for f in FAMS if _encs(ctx, f)]
+    dot_conds = [f for f in conds if f in FG.COND]           # chấm: tối đa 3 điều kiện (màu chấm phải phân biệt MỌI cặp) -> kho cắt giữa ở lưới + hình hiệu
     encs = [e for e in ORDER if any(k[2] == e for k in flat)]
     order = sorted(encs, key=lambda e: -max(v['diem'][FG.PANEL]['ap'] for k, v in flat.items() if k[2] == e))      # cùng thứ tự ở mọi hình
     et, ht = {e: SPECS[e].title for e in encs}, CL.TITLES
@@ -324,9 +402,17 @@ def figures(ctx, log=print, show=True):
     note = base + _gaps(order, flat, conds)
     figs = {}
     for m in FG.METRICS:
-        figs[f'cham_28_{FG.SLUG[m]}'] = FG.dots(flat, order, HEADS, conds, m, et, ht, FAM_TITLE, note)
+        figs[f'cham_28_{FG.SLUG[m]}'] = FG.dots(flat, order, HEADS, dot_conds, m, et, ht, FAM_TITLE, base + _gaps(order, flat, dot_conds)
+                                                + (' Kho cắt giữa: ở hình lưới và hình hiệu cắt giữa − đệm vuông.' if GEO_FAM in conds else ''))
     for m in FG.METRICS:
         figs[f'luoi_28_{FG.SLUG[m]}'] = FG.heat(flat, order, HEADS, conds, m, et, ht, FAM_TITLE, note)
+    if GEO_FAM in conds and PAD_FAM in conds:
+        f = FG.cond_diff(flat, [e for e in order if e in GEO.ROWS], HEADS, GEO_FAM, PAD_FAM, FG.METRICS, et, ht, 'cắt giữa', 'đệm vuông',
+                         base + ' Cả hai bên: Ver2, kho KHÔNG cân bằng histogram, mỗi bên trung bình 5 hạt của một lượt học riêng. Hiệu điểm MÔ TẢ — không CI; '
+                         'luật hai họ hình học (khoảng đồng thời max-T) ở C6 trên mAP21. Ba thứ đổi cùng lúc: viền đen, phần bị cắt ở hai đầu cạnh dài, cỡ '
+                         'giải phẫu trong khung (PLAN_89 §5.3).' + _gaps([e for e in order if e in GEO.ROWS], flat, [GEO_FAM, PAD_FAM]))
+        if f is not None:
+            figs['hieu_cat_giua_tru_dem_vuong_28'] = f
     if FAMS[0] in conds and FAMS[1] in conds:
         only = [et[e] for e in order if any(k[:2] == FAMS[1] and k[2] == e for k in flat) and not any(k[:2] == FAMS[0] and k[2] == e for k in flat)]
         vs_note = base + (f" {', '.join(only)}: chưa có {FAM_SHORT[FAMS[0]]} nên không có trong hình." if only else '') + \

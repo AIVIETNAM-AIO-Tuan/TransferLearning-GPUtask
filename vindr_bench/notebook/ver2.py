@@ -3,7 +3,8 @@
 của khối Drive chuẩn ở C0 (drive_api lấy đúng các tên cần, thiếu -> dừng).
 
     C2 setup   thư viện notebook + CỔNG bộ thư viện đã chốt (torch / CUDA / transformers / timm) + GPU G4 + đọc tệp resume
-    C3 data    kho ảnh của lượt (kcb = đệm vuông không cân bằng | cb = đệm vuông có cân bằng) + vân tay khoá / nhãn so với các lượt Ver1
+    C3 data    kho ảnh của lượt (kcb = đệm vuông không cân bằng | cb = đệm vuông có cân bằng | cg_kcb = cắt giữa không cân bằng, chỉ 8 hàng của phép thử
+               hình học — protocols/geometry.py) + vân tay khoá / nhãn so với các lượt Ver1
     C4 gate    tệp trọng số (Drive / Hugging Face) -> lớp bọc + cổng nạp trọng số (từng tensor = tệp) + số học bf16 so với fp32 trên ảnh val thật
     C5 smoke   chạy thử CẢ ba giai đoạn trên tập con ở lô 256 với đủ 4 loại đầu x 13 lr (số đo vô nghĩa) + cổng bộ nhớ GPU + phục hồi từ trạng thái
                resume; bỏ qua khi lượt đang resume
@@ -33,12 +34,13 @@ from ..protocols.ours import config as C
 from ..protocols.ours import gates as G
 from ..protocols.ours import pipeline as PL
 from ..protocols.ours import runtime as RT
+from ..protocols import geometry as GEO
 
 FOLDER = 'stage4_nb89'
 DRIVE_NAMES = ('kiem_ke', 'tai', 'xung_dot', 'ghi', 'ghi_json', 'dong_bo', 'ten_tren_drive', 'tim_moi_noi', 'khoi_phuc_cho', 'luu_resume', 'cho_nho',
                'GHI_LOC', 'TEN_RESUME', 'RUN_TAG', '_duong', '_liet_ke')   # = notebook/ver1.DRIVE_NAMES
-STORES = ('kcb', 'cb')                 # kho đệm vuông của 85 (PLAN_89 §5.2); kho cắt giữa (§5.3): thêm khi dựng kho
-STRICT_FINGERPRINT = ('kcb',)          # kho của các lượt Ver1: vân tay PHẢI trùng; kho khác: in trùng / khác (bảng gộp ghép theo khoá ảnh)
+STORES = ('kcb', 'cb', GEO.CROP_STORE)  # kho đệm vuông của 85 (PLAN_89 §5.2) + kho cắt giữa của 89k (§5.3; 0.9.0) — chỉ cho GEO.ROWS
+STRICT_FINGERPRINT = ('kcb', GEO.CROP_STORE)   # vân tay PHẢI trùng các lượt Ver1 (kho cắt giữa chép khoá / nhãn / tách từ kho kcb); kho khác: in trùng / khác
 MIN_FREE_GB = 15
 GATE_IMAGES = 16                       # số ảnh val cho cổng số học bf16 vs fp32
 SMOKE_SUBSET = dict(train=512, val=256, test=256)
@@ -48,7 +50,8 @@ ROUNDTRIP_TOL = 1e-3                   # dự đoán val (xác suất) của đ�
 
 
 def run_tag(encoder, store):
-    return f'r89v2_{encoder}_{store}'
+    '''+ spec.run_suffix (0.9.0): lớp bọc đổi sau khi hàng đã chạy -> lượt mới thư mục mới (PubMedCLIP chuẩn hoá ImageNet: r89v2_pubmedclip_<kho>_imnet).'''
+    return f"r89v2_{encoder}_{store}{getattr(SPECS.get(encoder), 'run_suffix', '')}"
 
 
 def notebook_name(encoder, store):
@@ -108,6 +111,7 @@ def setup(encoder, store, package_dir, ns, log=print):
     '''C2. -> CTX. Bộ thư viện / GPU khác bộ đã chốt -> dừng (PLAN_89 §8 mục 7, §1 Runtime).'''
     assert encoder in BUILT, f'{encoder}: lop boc chua dung ({BUILT}) -> DUNG'
     assert store in STORES, f'kho {store!r} khong thuoc {STORES} -> DUNG'
+    assert store != GEO.CROP_STORE or encoder in GEO.ROWS, f'{encoder}: khong thuoc phep thu hinh hoc ({GEO.ROWS}) -> khong chay kho {store}. DUNG'
     drive = drive_api(ns)
     assert drive['RUN_TAG'] == run_tag(encoder, store), f"RUN_TAG {drive['RUN_TAG']!r} != {run_tag(encoder, store)!r} -> DUNG"
     import vindr_bench

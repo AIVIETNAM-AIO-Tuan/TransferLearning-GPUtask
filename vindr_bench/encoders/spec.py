@@ -4,6 +4,7 @@ cuối, kiểu gộp, chuẩn hoá và độ phân giải GỐC của nó (khôn
 
 `status`: 'da_dung' = lớp bọc đã viết + kiểm bằng tệp trọng số thật; 'chua_dung' = mới ghi theo nguồn (cột `source_checked` nói đã đọc nguồn nào,
 phần chưa kiểm ghi trong `notes`). Gói không chứa ID Drive: tệp ở Drive được nhận dạng bằng đường dẫn tên + md5 + kích thước (encoders/files.py)."""
+import re
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -35,9 +36,12 @@ class EncoderSpec:
     file_md5: Optional[str] = None         # md5 + kích thước tệp Drive đã ghim (bản tải từ nguồn công khai của tác giả, kiểm trên máy)
     file_size: Optional[int] = None
     extra_files: Tuple[Tuple[str, str, int], ...] = ()   # tệp phụ CÙNG thư mục Drive (tên, md5, kích thước) — vd cấu hình của B (backbone_ft.pt)
+    run_suffix: str = ''                   # hậu tố RUN_TAG khi lớp bọc đổi SAU khi hàng đã chạy (lượt mới không trộn thư mục / tệp resume của lượt cũ):
+                                           # '_imnet' = PubMedCLIP chuẩn hoá ImageNet (16/11). Dùng ở notebook.ver1 / ver2.run_tag và evaluation.collect.
 
     def __post_init__(self):
         assert self.pool in POOLS and self.status in ('da_dung', 'chua_dung'), (self.name, self.pool, self.status)
+        assert self.run_suffix == '' or re.fullmatch(r'_[a-z0-9]+', self.run_suffix), (self.name, self.run_suffix)
         assert self.image_size % self.patch_size == 0, (self.name, self.image_size, self.patch_size)
         assert (self.drive_dir is None) == (self.drive_file is None) == (self.file_md5 is None) == (self.file_size is None), self.name
         assert not self.extra_files or (self.drive_dir and all(len(e) == 3 and e[1] and int(e[2]) > 0 for e in self.extra_files)), self.name
@@ -92,11 +96,16 @@ SPECS = {s.name: s for s in (
                 'repo hustvl/EVA-X @ eedd642 (eva_x.py, classification/utils/datasets.py) + bài 2405.05237 + tệp thật 14/11',
                 'vector toàn ảnh = fc_norm(TB token patch thô) = forward_head(pre_logits) của EVA_X (global_pool avg; bộ lọc của họ chuyển norm của MIM thành '
                 'fc_norm); token patch cho GLoRI / ML-Decoder = fc_norm áp từng token (quy ước của ta = đầu ra MIM lúc tiền huấn luyện)'),
-    EncoderSpec('pubmedclip', 'PubMedCLIP (ViT-B/32)', 'CLIP ViT-B/32 (định dạng OpenAI)', 224, 32, 768, CLIP_MEAN, CLIP_STD, 'cls',
-                'HF sarahESL/PubMedCLIP @ c5885a5: PubMedCLIP_ViT32.pth (khoá state_dict)', 'MIT', 'ROCO (cặp ảnh – chú thích từ PubMed), tinh chỉnh từ CLIP',
-                'da_dung', 'repo sarahESL/PubMedCLIP (README) + tệp thật 14/11',
-                'tệp = {best_epoch, state_dict, optimizer_state_dict, best_loss}; state_dict cùng khuôn CheXzero (302 khoá OpenAI); chuẩn hoá CLIP mặc định '
-                '(tiền xử lý clip.load) — chưa thấy tác giả đổi'),
+    EncoderSpec('pubmedclip', 'PubMedCLIP (ViT-B/32)', 'CLIP ViT-B/32 (định dạng OpenAI)', 224, 32, 768, IMAGENET_MEAN, IMAGENET_STD, 'cls',
+                'HF sarahESL/PubMedCLIP @ c5885a5: PubMedCLIP_ViT32.pth (khoá state_dict)', 'MIT (repo GitHub); thẻ HF ghi "cc"',
+                'ROCO (cặp ảnh – chú thích từ PubMed), tinh chỉnh từ CLIP', 'da_dung',
+                'repo sarahESL/PubMedCLIP (README) + tệp thật 14/11; mã tinh chỉnh @ bdecf3c (lib/data_transform/transform_wrapper.py, '
+                'configs/medclip_roco_all.yaml, lib/config/default.py — một commit 836d8cc) đọc 16/11',
+                'tệp = {best_epoch, state_dict, optimizer_state_dict, best_loss} (= khuôn torch.save của main/train.py); state_dict cùng khuôn CheXzero (302 '
+                'khoá OpenAI). CHUẨN HOÁ GỐC = ImageNet (16/11): mã tinh chỉnh của tác giả gán cứng Normalize ImageNet (trước 16/11 spec ghi CLIP — lượt '
+                'r89v1_pubmedclip_k64 / r89v2_pubmedclip_kcb / _cb là lượt lệch, Event 16/11). Tinh chỉnh ở RandomResizedCrop 250 (conv bước 32 -> lưới 7 x 7, '
+                'bỏ 26 px dưới / phải); lớp bọc giữ 224 = đúng lưới 7 x 7, không nội suy vị trí (tỉ lệ lệch ~1,12 lần, ghi trong bảng)',
+                run_suffix='_imnet'),
     EncoderSpec('chexworld', 'CheXWorld', 'ViT-B/16 (target encoder I-JEPA, không có CLS)', 224, 16, 768, IMAGENET_MEAN, IMAGENET_STD, 'mean_patch',
                 'Drive tác giả (README LeapLabTHU/CheXWorld): chexworld_pretrained.tar (checkpoint torch dạng zip), khoá model.target_encoder.*',
                 'repo không khai giấy phép (GitHub API 14/11)', 'MIMIC-CXR + NIH (train) + CheXpert, ~0,5M ảnh thẳng', 'da_dung',

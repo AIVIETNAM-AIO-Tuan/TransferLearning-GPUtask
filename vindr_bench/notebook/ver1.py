@@ -36,8 +36,9 @@ PAPER_HEAD = {'lin4': 'Linear', 'glori': 'GLoRI'}               # cột Bảng I
 
 def run_tag(encoder):
     '''_k64 (0.2.1, Tuấn 13/11 "chạy theo khúc cho đồng bộ"): mọi lượt Ver1 tính backbone theo khúc 64 ảnh. Lượt cũ r89v1_raddino (OOM ở Linear-4) và
-       r89v1_biomedclip (không chia khúc) giữ trên Drive làm hồ sơ.'''
-    return f'r89v1_{encoder}_k64'
+       r89v1_biomedclip (không chia khúc) giữ trên Drive làm hồ sơ. + spec.run_suffix (0.9.0): lớp bọc đổi sau khi hàng đã chạy -> lượt mới thư mục mới
+       (PubMedCLIP chuẩn hoá ImageNet: r89v1_pubmedclip_k64_imnet; lượt cũ r89v1_pubmedclip_k64 giữ trên Drive, Event 16/11).'''
+    return f"r89v1_{encoder}_k64{getattr(SPECS.get(encoder), 'run_suffix', '')}"
 
 
 def drive_api(ns):

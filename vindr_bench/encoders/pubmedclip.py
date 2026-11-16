@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """PubMedCLIP ViT-B/32 (sarahESL/PubMedCLIP) — tệp HF PubMedCLIP_ViT32.pth = {best_epoch, state_dict, optimizer_state_dict, best_loss}; state_dict cùng
-khuôn CLIP OpenAI (tinh chỉnh từ clip.load('ViT-B/32')). Tháp ảnh + đặc trưng: clip_openai. Chuẩn hoá: CLIP mặc định (tiền xử lý của clip.load)."""
+khuôn CLIP OpenAI (tinh chỉnh từ clip.load('ViT-B/32')). Tháp ảnh + đặc trưng: clip_openai. Chuẩn hoá gốc: ImageNet — mã tinh chỉnh của tác giả
+(lib/data_transform/transform_wrapper.py @ 836d8cc) gán cứng Normalize ImageNet, không dùng tiền xử lý của clip.load (spec.py; Event 16/11)."""
 import torch
 
 from ..checks import safe_load, weights
