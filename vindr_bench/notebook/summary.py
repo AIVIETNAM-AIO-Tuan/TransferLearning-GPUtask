@@ -10,7 +10,8 @@ một phần kết quả: lượt thiếu được liệt kê, ô tương ứng 
                 chiếu + khoảng đồng thời max-T khi có hàng B; 0.9.0: hai họ HÌNH HỌC (kho cắt giữa − kho đệm vuông; 28 phép khoá 13/11 + 60 phép mở rộng
                 16/11 — protocols/geometry.py), mỗi họ max-T riêng khi đủ phép
     C7 figures  biểu đồ 28 nhãn — AP bậc thang, AUROC, AUPRC hình thang, điểm không CI (evaluation/figures.py; Tuấn 15/11: hình chỉ cần 28 nhãn); kho cắt
-                giữa: ô thứ tư của hình lưới + hình hiệu cắt giữa − đệm vuông (hình chấm giữ 3 điều kiện — màu)
+                giữa: ô thứ tư của hình lưới + hình hiệu cắt giữa − đệm vuông (hình chấm giữ 3 điều kiện — màu); 0.9.1 (Tuấn 16/11): 7 dấu hiệu Bảng 1a bài
+                RAD-DINO — TB 7 (AUPRC hình thang + AP bậc thang: chấm + lưới) và AUPRC từng dấu hiệu (mỗi điều kiện một hình)
     C8 sync     ghi JSON + CSV + PNG, dong_bo()
 
 Cách đọc (in kèm ở từng bảng): mAP21 = AP bậc thang macro 21 lớp (số của luật); AUPRC = hình thang; CI95 = bootstrap theo ảnh, DANH NGHĨA (chưa hiệu
@@ -146,6 +147,10 @@ def score(ctx, log=print, n_boot=P.N_BOOT, workers=None):
             ens = {p: {m: float(v) for m, v in P.point(mean, s0.target, c[p]).items() if m in ('ap', 'auprc_thang', 'auroc')} for p in P.PANELS}
         cell = CP.make_cell([st for _, st in items], ens)
         cell.update(lr=s0.lr, bien=s0.edge, nguon=s0.source, val_auroc=s0.val_auroc, khoa_nhan=CP.target_key(s0.target), hat=[s.seed for s, _ in items])
+        # 0.9.1: TỪNG dấu hiệu của 7 dấu hiệu RAD-DINO (điểm; TB các hạt như số macro) — tính thẳng từ dự đoán, KHÔNG vào bộ nhớ đệm bootstrap
+        c7 = cols[CP.target_key(s0.target)]['p7']
+        per7 = [P.point(s.preds, s.target, c7) for s, _ in items]
+        cell['p7_lop'] = {m: [float(v) for v in np.mean([x[f'{m}_lop'] for x in per7], 0)] for m in ('ap', 'auprc_thang', 'auroc')}
         cells[key] = cell
     ctx.update(o=cells, n_boot=n_boot, cot=cols)
     log(f"{len(dl['sets'])} bo du doan -> {len(cells)} o (phien ban, kho, encoder, dau, nhanh) | bootstrap {n_boot} lan / bo, {workers} tien trinh | "
@@ -375,6 +380,18 @@ def _note28(ctx):
             f'hạt 0. Không vẽ khoảng tin cậy (bootstrap trên 28 nhãn không ổn vì lớp hiếm); CI và luật §7.4 ở bảng mAP21 (C5–C6).')
 
 
+def _note7(ctx):
+    '''Câu ghi chú của hình 7 dấu hiệu RAD-DINO, dựng từ DỮ LIỆU (số ca dương test của từng dấu hiệu) + cách tính + mốc bài (chỉ đặt cạnh).'''
+    names = list(ctx['dl']['nhan'])
+    t = np.asarray(ctx['dl']['sets'][0].target)
+    pos = ', '.join(f'{n} {int(t[:, names.index(n)].sum())}' for n in P.RADDINO7)
+    paper = f'{P.RADDINO_PAPER_7:.3f}'.replace('.', ',')
+    return (f'7 dấu hiệu của Bảng 1a bài RAD-DINO (ca dương ở test: {pos}). AUPRC = diện tích dưới đường precision–recall nối thẳng các điểm (hình '
+            f'thang); AP = bậc thang (= "AUPRC" của CheXFound / torchmetrics); TB 7 = trung bình 7 dấu hiệu. Bài RAD-DINO báo AUPRC macro 7 dấu hiệu {paper} '
+            f'— checkpoint của bài khác checkpoint công khai và bài không nêu cách tính AUPRC: chỉ đặt cạnh, không so. Ver2 = trung bình 5 hạt (từng dấu hiệu '
+            f'cũng vậy), Ver1 = một lượt hạt 0. Không vẽ khoảng tin cậy.')
+
+
 def _expected(e, c):
     '''Hàng e có phải chạy ở điều kiện c không (kho cắt giữa: chỉ 8 hàng của phép thử hình học).'''
     return e in CL.STORE_ROWS.get(c[1], (e,)) if c[0] == 'v2' else True
@@ -406,6 +423,17 @@ def figures(ctx, log=print, show=True):
                                                 + (' Kho cắt giữa: ở hình lưới và hình hiệu cắt giữa − đệm vuông.' if GEO_FAM in conds else ''))
     for m in FG.METRICS:
         figs[f'luoi_28_{FG.SLUG[m]}'] = FG.heat(flat, order, HEADS, conds, m, et, ht, FAM_TITLE, note)
+    # 0.9.1 (Tuấn 16/11 "add plots for AUPRC in 7 findings like RAD-DINO"): 7 dấu hiệu Bảng 1a bài RAD-DINO — TB 7 (AUPRC hình thang + AP bậc thang, vì bài
+    # không nêu cách tính AUPRC) và TỪNG dấu hiệu (AUPRC hình thang), mỗi điều kiện một hình
+    base7 = _note7(ctx)
+    for m in ('auprc_thang', 'ap'):
+        figs[f'cham_7_{FG.SLUG[m]}'] = FG.dots(flat, order, HEADS, dot_conds, m, et, ht, FAM_TITLE, base7 + _gaps(order, flat, dot_conds)
+                                               + (' Kho cắt giữa: ở hình lưới.' if GEO_FAM in conds else ''), panel='p7')
+        figs[f'luoi_7_{FG.SLUG[m]}'] = FG.heat(flat, order, HEADS, conds, m, et, ht, FAM_TITLE, base7 + _gaps(order, flat, conds), panel='p7')
+    for fam in conds:
+        f = FG.findings(flat, order, HEADS, fam, P.RADDINO7, 'auprc_thang', et, ht, FAM_TITLE, base7 + _gaps(order, flat, [fam]))
+        if f is not None:
+            figs[f'auprc_7_dau_hieu_{fam[0]}_{fam[1]}'] = f
     if GEO_FAM in conds and PAD_FAM in conds:
         f = FG.cond_diff(flat, [e for e in order if e in GEO.ROWS], HEADS, GEO_FAM, PAD_FAM, FG.METRICS, et, ht, 'cắt giữa', 'đệm vuông',
                          base + ' Cả hai bên: Ver2, kho KHÔNG cân bằng histogram, mỗi bên trung bình 5 hạt của một lượt học riêng. Hiệu điểm MÔ TẢ — không CI; '

@@ -31,8 +31,22 @@ DIV = ('#e34948', '#f0efec', '#2a78d6')          # âm (hàng tham chiếu kém)
 PANEL = 'p28'
 METRICS = ('ap', 'auroc', 'auprc_thang')
 SLUG = {'ap': 'ap', 'auroc': 'auroc', 'auprc_thang': 'auprc'}
-METRIC_TEXT = {'ap': 'AP 28 nhãn (bậc thang)', 'auroc': 'AUROC 28 nhãn', 'auprc_thang': 'AUPRC 28 nhãn (hình thang)'}
-METRIC_SHORT = {'ap': 'AP 28', 'auroc': 'AUROC 28', 'auprc_thang': 'AUPRC 28'}
+PANEL_TEXT = {'p28': '28 nhãn', 'p7': '7 dấu hiệu RAD-DINO'}       # 0.9.1: hình theo panel (28 nhãn; 7 dấu hiệu Bảng 1a bài RAD-DINO)
+PANEL_SHORT = {'p28': '28', 'p7': '7'}
+_MT = {'ap': 'AP {} (bậc thang)', 'auroc': 'AUROC {}', 'auprc_thang': 'AUPRC {} (hình thang)'}
+_MS = {'ap': 'AP', 'auroc': 'AUROC', 'auprc_thang': 'AUPRC'}
+
+
+def metric_text(metric, panel=PANEL):
+    return _MT[metric].format(PANEL_TEXT[panel])
+
+
+def metric_short(metric, panel=PANEL):
+    return f'{_MS[metric]} {PANEL_SHORT[panel]}'
+
+
+METRIC_TEXT = {m: metric_text(m) for m in METRICS}       # = chữ của hình 28 nhãn (không đổi so với 0.7.0)
+METRIC_SHORT = {m: metric_short(m) for m in METRICS}
 FS = dict(title=9.0, base=8.0, tick=7.5, cell=7.0, label=6.8, note=7.0)        # cỡ chữ (pt)
 
 
@@ -212,9 +226,9 @@ def dots(cells, encoders, heads, conds, metric, enc_title, head_title, cond_titl
         _clean(ax, 'x')
         ax.set_yticks(range(n))
         ax.set_yticklabels([enc_title[e] for e in encoders])
-        ax.set_xlabel(METRIC_SHORT[metric])
+        ax.set_xlabel(metric_short(metric, panel))
     axes[0].set_ylim(n - 0.5, -0.5)
-    _layout(fig, f'{METRIC_TEXT[metric]} trên test VinDr-CXR — mỗi ô một đầu đọc, mỗi hàng một encoder', note, legend=_cond_handles(conds, cond_title))
+    _layout(fig, f'{metric_text(metric, panel)} trên test VinDr-CXR — mỗi ô một đầu đọc, mỗi hàng một encoder', note, legend=_cond_handles(conds, cond_title))
     return fig
 
 
@@ -247,7 +261,62 @@ def heat(cells, encoders, heads, conds, metric, enc_title, head_title, cond_titl
         ax.set_ylim(len(encoders) - 0.5, -0.5)
         ax.set_title(cond_title[c], loc='left')
         _bare(ax)
-    _layout(fig, f'{METRIC_TEXT[metric]} trên test VinDr-CXR — lưới encoder x đầu đọc', note, cbar=(im, METRIC_SHORT[metric]) if im is not None else None)
+    _layout(fig, f'{metric_text(metric, panel)} trên test VinDr-CXR — lưới encoder x đầu đọc', note,
+            cbar=(im, metric_short(metric, panel)) if im is not None else None)
+    return fig
+
+
+def findings(cells, encoders, heads, cond, names, metric, enc_title, head_title, cond_title, note=None, panel='p7', per_key='p7_lop'):
+    '''TỪNG dấu hiệu của một panel (mặc định 7 dấu hiệu Bảng 1a bài RAD-DINO) ở MỘT điều kiện: lưới các ô (mỗi ô một đầu đọc, 2 cột), hàng = encoder có số ở
+       điều kiện này, cột = từng dấu hiệu theo `names` + "TB" (= số macro của panel ở ô đó, = trung bình các cột trước); số trong mọi ô ('–' = chưa có lượt);
+       một thang màu một sắc chung cả hình. cells[(ver, kho, encoder, đầu)][per_key][metric] = list giá trị từng dấu hiệu (Ver2: TB các hạt). -> Figure | None.'''
+    plt = _plt()
+    rows = [e for e in encoders if any(per_key in (cells.get((cond[0], cond[1], e, h)) or {}) for h in heads)]
+    if not rows:
+        return None
+    labels = list(names) + [f'TB {len(names)}']
+
+    def vals(e, h):
+        c = cells.get((cond[0], cond[1], e, h))
+        if c is None or per_key not in c:
+            return [np.nan] * len(labels)
+        v = list(c[per_key][metric]) + [c['diem'][panel][metric]]
+        assert len(v) == len(labels), (len(v), len(labels))
+        return [float(x) if x == x else np.nan for x in v]
+    A = {h: np.array([vals(e, h) for e in rows]) for h in heads}
+    fin = np.concatenate([a[np.isfinite(a)] for a in A.values()])
+    vmin, vmax = (float(fin.min()), float(fin.max())) if fin.size else (0.0, 1.0)
+    ncol = 2 if len(heads) > 1 else 1
+    nrow = int(np.ceil(len(heads) / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(ncol * (0.52 * len(labels) + 0.3) + 1.7, nrow * (0.3 * len(rows) + 0.75) + 2.3), sharex=True, sharey=True,
+                             squeeze=False)
+    cm = _cmap(SEQ, 'mot_sac')
+    im = None
+    for ax, h in zip(axes.ravel(), heads):
+        a = A[h]
+        im = ax.imshow(np.ma.masked_invalid(a), cmap=cm, vmin=vmin, vmax=vmax, aspect='auto')
+        for i in range(a.shape[0]):
+            for j in range(a.shape[1]):
+                if np.isfinite(a[i, j]):
+                    dark = (a[i, j] - vmin) / max(vmax - vmin, 1e-9) > 0.42
+                    ax.text(j, i, _fmt(a[i, j]), ha='center', va='center', fontsize=FS['cell'] - 0.5, color='#ffffff' if dark else INK)
+                else:
+                    ax.text(j, i, '–', ha='center', va='center', fontsize=FS['cell'], color=MUTED)
+        ax.axvline(len(names) - 0.5, color=SURFACE, linewidth=4)           # tách cột TB khỏi các dấu hiệu
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, rotation=35, ha='right', rotation_mode='anchor')
+        ax.set_yticks(range(len(rows)))
+        ax.set_yticklabels([enc_title[e] for e in rows])
+        ax.set_xticks(np.arange(0.5, len(labels) - 1, 1), minor=True)
+        ax.set_yticks(np.arange(0.5, len(rows) - 1, 1), minor=True)
+        ax.set_xlim(-0.5, len(labels) - 0.5)
+        ax.set_ylim(len(rows) - 0.5, -0.5)
+        ax.set_title(head_title[h], loc='left')
+        _bare(ax)
+    for ax in axes.ravel()[len(heads):]:
+        ax.set_visible(False)
+    _layout(fig, f'{metric_text(metric, panel)} từng dấu hiệu — {cond_title[cond]} (hàng: encoder, cột: dấu hiệu; mỗi ô một đầu đọc)', note,
+            cbar=(im, metric_short(metric, panel)))
     return fig
 
 
@@ -283,12 +352,12 @@ def versus(cells, encoders, heads, x_cond, y_cond, metric, enc_title, head_title
         ax.set_ylim(lo, hi)
         _clean(ax, 'both')
         if k == 0:
-            ax.set_ylabel(f'{METRIC_SHORT[metric]} · {cond_title[y_cond]}', fontsize=FS['tick'])
+            ax.set_ylabel(f'{metric_short(metric, panel)} · {cond_title[y_cond]}', fontsize=FS['tick'])
         else:
             ax.tick_params(labelleft=False)
-    fig.text((left + (n * s + (n - 1) * gap) / 2) / W, (note_h + 0.06) / H, f'{METRIC_SHORT[metric]} · {cond_title[x_cond]}', ha='center', va='bottom',
+    fig.text((left + (n * s + (n - 1) * gap) / 2) / W, (note_h + 0.06) / H, f'{metric_short(metric, panel)} · {cond_title[x_cond]}', ha='center', va='bottom',
              fontsize=FS['tick'], color=INK2)                                       # nhãn trục x chung (một lần cho cả hàng ô)
-    _layout(fig, f'{METRIC_TEXT[metric]}: {cond_title[x_cond]} (trục x) so với {cond_title[y_cond]} (trục y) — mỗi chấm một encoder', note, tight=False)
+    _layout(fig, f'{metric_text(metric, panel)}: {cond_title[x_cond]} (trục x) so với {cond_title[y_cond]} (trục y) — mỗi chấm một encoder', note, tight=False)
     rnd = _renderer(fig)
     for ax, h in zip(axes, heads):
         _labels(ax, [_val(cells, x_cond, e, h, metric, panel) for e in both[h]], [_val(cells, y_cond, e, h, metric, panel) for e in both[h]],
@@ -296,7 +365,7 @@ def versus(cells, encoders, heads, x_cond, y_cond, metric, enc_title, head_title
     return fig
 
 
-def _diff_heat(rows, d, heads, metrics, row_title, head_title, title, cbar_label, note):
+def _diff_heat(rows, d, heads, metrics, row_title, head_title, title, cbar_label, note, panel=PANEL):
     '''Bản đồ nhiệt PHÂN KỲ của hiệu d(hàng, đầu, số đo): mỗi số đo một ô, hàng = rows, cột = đầu đọc; số có dấu trong mọi ô ('·' = không tính được);
        thang đối xứng quanh 0 chung cho mọi ô. Dùng chung cho ref_diff (B − X) và cond_diff (điều kiện a − điều kiện b).'''
     plt = _plt()
@@ -324,7 +393,7 @@ def _diff_heat(rows, d, heads, metrics, row_title, head_title, title, cbar_label
         ax.set_yticks(np.arange(0.5, len(rows) - 1, 1), minor=True)
         ax.set_xlim(-0.5, len(heads) - 0.5)
         ax.set_ylim(len(rows) - 0.5, -0.5)
-        ax.set_title(METRIC_SHORT[m], loc='left')
+        ax.set_title(metric_short(m, panel), loc='left')
         _bare(ax)
     _layout(fig, title, note, cbar=(im, cbar_label))
     return fig
@@ -342,8 +411,8 @@ def ref_diff(cells, ref, encoders, heads, cond, metrics, enc_title, head_title, 
     if not others:
         return None
     return _diff_heat(others, d, heads, metrics, enc_title, head_title,
-                      f'Hiệu điểm {enc_title[ref]} − X trên 28 nhãn — {cond_title[cond]} (mỗi hàng một X, cùng đầu đọc)',
-                      f'{enc_title[ref]} − X (xanh: {enc_title[ref]} cao hơn)', note)
+                      f'Hiệu điểm {enc_title[ref]} − X trên {PANEL_TEXT[panel]} — {cond_title[cond]} (mỗi hàng một X, cùng đầu đọc)',
+                      f'{enc_title[ref]} − X (xanh: {enc_title[ref]} cao hơn)', note, panel)
 
 
 def cond_diff(cells, encoders, heads, cond_a, cond_b, metrics, enc_title, head_title, short_a, short_b, note=None, panel=PANEL):
@@ -359,8 +428,8 @@ def cond_diff(cells, encoders, heads, cond_a, cond_b, metrics, enc_title, head_t
     if not rows:
         return None
     return _diff_heat(rows, d, heads, metrics, enc_title, head_title,
-                      f'Hiệu điểm {short_a} − {short_b} trên 28 nhãn — cùng encoder, cùng đầu đọc (mỗi hàng một encoder)',
-                      f'{short_a} − {short_b} (xanh: {short_a} cao hơn)', note)
+                      f'Hiệu điểm {short_a} − {short_b} trên {PANEL_TEXT[panel]} — cùng encoder, cùng đầu đọc (mỗi hàng một encoder)',
+                      f'{short_a} − {short_b} (xanh: {short_a} cao hơn)', note, panel)
 
 
 def lr_curves(curves, chosen, encoders, heads, store, metric, enc_title, head_title, title, note=None):
