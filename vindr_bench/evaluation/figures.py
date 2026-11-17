@@ -14,6 +14,8 @@ Chọn dạng theo việc của dữ liệu; màu ĐÃ CHẠY bộ kiểm bảng
   - ref_diff   hiệu điểm hàng tham chiếu − X (mô tả, không CI): bản đồ nhiệt PHÂN KỲ đỏ <-> xám <-> xanh, số trong mọi ô
   - cond_diff  hiệu điểm điều kiện a − điều kiện b của cùng encoder (0.9.0: kho cắt giữa − kho đệm vuông): cùng khuôn với ref_diff
   - lr_curves  số đo val theo lr: đường, 4 đầu = 4 màu theo thứ tự cố định (cặp kề nhau: đạt)
+  - delta_modes (0.9.2) hiệu của cùng một hàng theo tối đa 3 cách tính: chấm, mỗi đầu đọc một ô, đường 0 + ngưỡng ±; 3 ô màu đầu (đạt mọi cặp) + hình chấm
+  - lead_shift  (0.9.2) trước -> sau của từng hàng (dumbbell): MỘT màu, chấm rỗng = trước, chấm đặc = sau, vạch nối (dataviz: "before -> after per item")
   Điều kiện thứ tư (0.9.0, kho cắt giữa): KHÔNG thêm màu thứ tư vào `dots` — chấm của các điều kiện chồng lên nhau nên mọi cặp màu phải phân biệt, và ô màu thứ
   tư (vàng cạnh cam) trượt sàn mọi cặp của bảng màu (dataviz palette.md) -> dots giữ 3 điều kiện; kho cắt giữa ở `heat` (mỗi điều kiện một ô, thang một sắc) và
   ở `cond_diff`.
@@ -31,8 +33,10 @@ DIV = ('#e34948', '#f0efec', '#2a78d6')          # âm (hàng tham chiếu kém)
 PANEL = 'p28'
 METRICS = ('ap', 'auroc', 'auprc_thang')
 SLUG = {'ap': 'ap', 'auroc': 'auroc', 'auprc_thang': 'auprc'}
-PANEL_TEXT = {'p28': '28 nhãn', 'p7': '7 dấu hiệu RAD-DINO'}       # 0.9.1: hình theo panel (28 nhãn; 7 dấu hiệu Bảng 1a bài RAD-DINO)
-PANEL_SHORT = {'p28': '28', 'p7': '7'}
+PANEL_TEXT = {'p28': '28 nhãn', 'p7': '7 dấu hiệu RAD-DINO', 'p21': '21 lớp chính'}   # 0.9.1: hình theo panel; 0.9.2: p21 (panel của luật) cho ô phép thử cắt giữa
+PANEL_SHORT = {'p28': '28', 'p7': '7', 'p21': '21'}
+MODES = (('#2a78d6', 'o'), ('#eb6834', 's'), ('#1baf7a', 'D'))      # 0.9.2 delta_modes: 3 ô màu đầu (đạt MỌI cặp, như COND) + khác hình chấm
+ONE_HUE = '#2a78d6'                                                 # 0.9.2 lead_shift (trước -> sau): MỘT màu, chấm rỗng = trước, chấm đặc = sau
 _MT = {'ap': 'AP {} (bậc thang)', 'auroc': 'AUROC {}', 'auprc_thang': 'AUPRC {} (hình thang)'}
 _MS = {'ap': 'AP', 'auroc': 'AUROC', 'auprc_thang': 'AUPRC'}
 
@@ -430,6 +434,87 @@ def cond_diff(cells, encoders, heads, cond_a, cond_b, metrics, enc_title, head_t
     return _diff_heat(rows, d, heads, metrics, enc_title, head_title,
                       f'Hiệu điểm {short_a} − {short_b} trên {PANEL_TEXT[panel]} — cùng encoder, cùng đầu đọc (mỗi hàng một encoder)',
                       f'{short_a} − {short_b} (xanh: {short_a} cao hơn)', note, panel)
+
+
+def delta_modes(values, rows, heads, modes, row_title, head_title, mode_title, title, xlabel, note=None, margin=None):
+    '''Hiệu của CÙNG một hàng theo vài cách tính (tối đa 3: ba ô màu đầu đạt mọi cặp + khác hình chấm): values[(hàng, đầu, cách)] = list số — 0, 1 hoặc
+       nhiều chấm. Mỗi đầu đọc một ô; trục y = hàng (cùng thứ tự mọi ô); trục x = hiệu, CHUNG cho mọi ô; đường 0 liền; margin: hai đường đứt ở ±margin.
+       Điểm, không khoảng tin cậy (số + CI ở bảng cùng ô notebook). Mỗi cách một Line2D có gid = tên cách. -> Figure | None (không có số nào).'''
+    from matplotlib.lines import Line2D
+    assert len(modes) <= len(MODES), f'delta_modes: toi da {len(MODES)} cach (mau dat moi cap), nhan {len(modes)}'
+
+    def pts(r, h, m):
+        return [float(v) for v in (values.get((r, h, m)) or []) if v is not None and v == v]
+    if not any(pts(r, h, m) for r in rows for h in heads for m in modes):
+        return None
+    plt = _plt()
+    n = len(rows)
+    fig, axes = plt.subplots(1, len(heads), figsize=(2.55 * len(heads) + 1.4, 0.38 * n + 1.9), sharey=True, sharex=True, squeeze=False)
+    axes = axes[0]
+    off = np.linspace(-0.22, 0.22, len(modes)) if len(modes) > 1 else np.zeros(1)
+    for ax, h in zip(axes, heads):
+        for i in range(n - 1):
+            ax.axhline(i + 0.5, color=GRID, linewidth=0.5, zorder=0)
+        ax.axvline(0.0, color=MUTED, linewidth=0.9, zorder=1)
+        if margin:
+            for s in (-margin, margin):
+                ax.axvline(s, color=AXIS, linewidth=0.8, linestyle=(0, (3, 3)), zorder=1)
+        for (col, mk), m, dy in zip(MODES, modes, off):
+            xy = [(v, i + dy) for i, r in enumerate(rows) for v in pts(r, h, m)]
+            if xy:
+                ax.plot([p[0] for p in xy], [p[1] for p in xy], linestyle='', marker=mk, color=col, markersize=4.8, markeredgecolor=SURFACE,
+                        markeredgewidth=0.6, zorder=3, gid=m)
+        ax.set_title(head_title[h], loc='left')
+        _clean(ax, 'x')
+        ax.set_yticks(range(n))
+        ax.set_yticklabels([row_title[r] for r in rows])
+        ax.set_xlabel(xlabel)
+    axes[0].set_ylim(n - 0.5, -0.5)
+    hd = [Line2D([], [], linestyle='', marker=mk, color=col, markersize=5.5, markeredgecolor=SURFACE, markeredgewidth=0.6) for (col, mk), _ in zip(MODES, modes)]
+    _layout(fig, title, note, legend=(hd, [mode_title[m] for m in modes]))
+    return fig
+
+
+def lead_shift(before, after, rows, heads, row_title, head_title, labels, title, xlabel, note=None):
+    '''Trước -> sau của từng hàng (dumbbell, MỘT màu): before / after[(hàng, đầu)] = số | None. Mỗi đầu đọc một ô; trục y = hàng; trục x chung; đường 0
+       liền; chấm RỖNG = trước, chấm ĐẶC = sau, vạch nối mảnh giữa hai chấm (thiếu một bên -> chỉ vẽ chấm còn lại). labels = (tên trước, tên sau). Điểm,
+       không khoảng tin cậy. Line2D có gid 'truoc' / 'sau'. -> Figure | None.'''
+    from matplotlib.lines import Line2D
+
+    def val(d, r, h):
+        v = d.get((r, h))
+        return float(v) if v is not None and v == v else None
+    if not any(val(d, r, h) is not None for d in (before, after) for r in rows for h in heads):
+        return None
+    plt = _plt()
+    n = len(rows)
+    fig, axes = plt.subplots(1, len(heads), figsize=(2.55 * len(heads) + 1.4, 0.34 * n + 1.9), sharey=True, sharex=True, squeeze=False)
+    axes = axes[0]
+    for ax, h in zip(axes, heads):
+        for i in range(n - 1):
+            ax.axhline(i + 0.5, color=GRID, linewidth=0.5, zorder=0)
+        ax.axvline(0.0, color=MUTED, linewidth=0.9, zorder=1)
+        b = [(val(before, r, h), i) for i, r in enumerate(rows)]
+        a = [(val(after, r, h), i) for i, r in enumerate(rows)]
+        for (vb, i), (va, _) in zip(b, a):
+            if vb is not None and va is not None:
+                ax.plot([vb, va], [i, i], '-', color=MUTED, linewidth=1.1, zorder=2)
+        if any(v is not None for v, _ in b):
+            ax.plot([v for v, _ in b if v is not None], [i for v, i in b if v is not None], linestyle='', marker='o', markerfacecolor=SURFACE,
+                    markeredgecolor=ONE_HUE, markersize=5.2, markeredgewidth=1.3, zorder=3, gid='truoc')
+        if any(v is not None for v, _ in a):
+            ax.plot([v for v, _ in a if v is not None], [i for v, i in a if v is not None], linestyle='', marker='o', color=ONE_HUE, markersize=5.6,
+                    markeredgecolor=SURFACE, markeredgewidth=0.6, zorder=4, gid='sau')
+        ax.set_title(head_title[h], loc='left')
+        _clean(ax, 'x')
+        ax.set_yticks(range(n))
+        ax.set_yticklabels([row_title[r] for r in rows])
+        ax.set_xlabel(xlabel)
+    axes[0].set_ylim(n - 0.5, -0.5)
+    hd = [Line2D([], [], linestyle='', marker='o', markerfacecolor=SURFACE, markeredgecolor=ONE_HUE, markersize=5.5, markeredgewidth=1.3),
+          Line2D([], [], linestyle='', marker='o', color=ONE_HUE, markersize=5.8, markeredgecolor=SURFACE, markeredgewidth=0.6)]
+    _layout(fig, title, note, legend=(hd, list(labels)))
+    return fig
 
 
 def lr_curves(curves, chosen, encoders, heads, store, metric, enc_title, head_title, title, note=None):

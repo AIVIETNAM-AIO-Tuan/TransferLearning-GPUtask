@@ -12,7 +12,9 @@ một phần kết quả: lượt thiếu được liệt kê, ô tương ứng 
     C7 figures  biểu đồ 28 nhãn — AP bậc thang, AUROC, AUPRC hình thang, điểm không CI (evaluation/figures.py; Tuấn 15/11: hình chỉ cần 28 nhãn); kho cắt
                 giữa: ô thứ tư của hình lưới + hình hiệu cắt giữa − đệm vuông (hình chấm giữ 3 điều kiện — màu); 0.9.1 (Tuấn 16/11): 7 dấu hiệu Bảng 1a bài
                 RAD-DINO — TB 7 (AUPRC hình thang + AP bậc thang: chấm + lưới) và AUPRC từng dấu hiệu (mỗi điều kiện một hình)
-    C8 sync     ghi JSON + CSV + PNG, dong_bo()
+    C7b crop_test  0.9.2 (Tuấn 17/11): phép thử cắt giữa RIÊNG — ba bảng (Δ ba số đo ở nhánh luật; tách phần chọn lr: luật / cùng lr / theo AP; B − X trên
+                từng kho) + ba hình (hiệu 21 lớp, ba cách chọn lr, B − X trước -> sau); chỉ mô tả, luật vẫn ở C6; tệp riêng cat_giua_* ở C8
+    C8 sync     ghi JSON + CSV + PNG (+ tệp cat_giua_* của C7b), dong_bo()
 
 Cách đọc (in kèm ở từng bảng): mAP21 = AP bậc thang macro 21 lớp (số của luật); AUPRC = hình thang; CI95 = bootstrap theo ảnh, DANH NGHĨA (chưa hiệu
 chỉnh nhiều phép so) trừ họ max-T; Ver1 một hạt (sàng lọc); CI chứa 0 = chưa phát hiện khác biệt, không phải "bằng nhau"."""
@@ -469,6 +471,193 @@ def figures(ctx, log=print, show=True):
     return figs
 
 
+CROP_MODES = ('luat', 'cung_lr', 'ap')
+CROP_MODE_TITLE = {'luat': 'lr của luật (AUROC val), chọn riêng ở mỗi kho', 'cung_lr': 'cùng một lr ở hai kho', 'ap': 'lr theo AP val, chọn riêng ở mỗi kho'}
+CROP_MODE_TEXT = {'luat': 'luat', 'cung_lr': 'cung lr', 'ap': 'theo AP'}
+M3 = ('ap', 'auprc_thang', 'auroc')
+
+
+def _lr_key(lr):
+    return float(f'{float(lr):.6g}')
+
+
+def _arm_cells(o, fam, e, h):
+    '''-> {lr: (nhánh, ô)} của các đầu ĐÃ HỌC XONG pha 2 ở (kho, encoder, đầu): nhánh luật, và nhánh "theo AP" khi lr của nó khác lr của luật.'''
+    out = {}
+    for arm in ('luat', 'ap'):
+        c = o.get((fam[0], fam[1], e, h, arm))
+        if c is not None:
+            out.setdefault(_lr_key(c['lr']), (arm, c))
+    return out
+
+
+def _ap_cell(ctx, fam, e, h):
+    '''Ô ở lr có AP val cao nhất: nhánh "theo AP" nếu có; lượt ghi rõ lr theo AP TRÙNG lr của luật -> ô nhánh luật; không rõ -> None (không đoán).'''
+    c = ctx['o'].get((fam[0], fam[1], e, h, 'ap'))
+    if c is not None:
+        return 'ap', c
+    ch = (ctx['dl']['chon_v2'].get((e, fam[1])) or {}).get(h)
+    c = ctx['o'].get((fam[0], fam[1], e, h, 'luat'))
+    return ('luat', c) if c is not None and ch and ch.get('ap_trung_luat') else None
+
+
+def _d3(plus, minus, panel='p21'):
+    '''Hiệu điểm ba số đo của một panel (AP bậc thang, AUPRC hình thang, AUROC): tổng các ô `plus` − tổng các ô `minus`.'''
+    return {m: float(sum(c['diem'][panel][m] for c in plus) - sum(c['diem'][panel][m] for c in minus)) for m in M3}
+
+
+def _t3(d):
+    return f"{_d(d['ap'])} / {_d(d['auprc_thang'])} / {_d(d['auroc'])}"
+
+
+def _cg_row(bang, e, h, cach, chieu, lr_pad, lr_crop, d3, r=None, ghi_chu=''):
+    '''Một hàng của bảng dài phép thử cắt giữa (CSV): một hiệu + ba số đo + CI danh nghĩa của AP21 + điều kiện bằng chữ.'''
+    ci, nua = (r['ci'], r['nua']) if r else ([None, None], [None, None])
+    return dict(bang=bang, encoder=e, hang=_row(e), dau=h, cach_chon_lr=cach, chieu_phep_tru=chieu, lr_dem_vuong=lr_pad, lr_cat_giua=lr_crop, d_AP21=d3['ap'],
+                ci_thap=ci[0], ci_cao=ci[1], d_AUPRC21_hinh_thang=d3['auprc_thang'], d_AUROC21=d3['auroc'], d_AP21_nua_0=nua[0], d_AP21_nua_1=nua[1], ghi_chu=ghi_chu)
+
+
+def crop_test(ctx, log=print, show=True, reference=REFERENCE):
+    '''C7b (0.9.2, Tuấn 17/11: bảng + hình của phép thử cắt giữa để RIÊNG, không trộn vào C5 / C6 / C7). Ver2, kho cắt giữa so với kho đệm vuông (cả hai
+       không cân bằng), nhánh nào cũng TB các hạt; ba bảng + ba hình, chỉ MÔ TẢ (luật + khoảng đồng thời max-T vẫn ở cuối C6):
+         Bảng 1  Δ = cắt giữa − đệm vuông ở nhánh luật: AP bậc thang / AUPRC hình thang / AUROC 21 lớp + CI95 danh nghĩa của Δ AP21 + Δ từng hạt
+         Bảng 2  tách phần chọn lr (đặt SAU khi thấy kết quả 17/11): Δ theo luật, Δ ở CÙNG lr (lr có đầu học xong ở cả hai kho), Δ khi mỗi kho chọn lr theo AP val
+         Bảng 3  B − X trên từng kho và thay đổi của nó (= Δ_B − Δ_X), nhánh luật + nhánh theo AP
+       -> dict (ctx['cat_giua']); hình ở ctx['hinh_cat_giua'] (ghi tệp RIÊNG ở C8: cat_giua_*).'''
+    o = ctx['o']
+    cell = lambda fam, e, h, arm='luat': o.get((fam[0], fam[1], e, h, arm))
+    rows = [e for e in ORDER if e in GEO.ROWS and any(_pair_ok(cell(GEO_FAM, e, h), cell(PAD_FAM, e, h)) for h in HEADS)]
+    gaps = [SPECS[e].title for e in ORDER if e in GEO.ROWS and e not in rows]
+    n_img = sorted({len(s.target) for s in ctx['dl']['sets'] if s.ver == 'v2' and s.store in (GEO.CROP_STORE, GEO.PAD_STORE)})
+    cond = ('Ver2 = ma + moi truong cua ta (G4) | kho CAT GIUA (co canh ngan + cat giua) so voi kho DEM VUONG, ca hai KHONG can bang histogram | backbone dong '
+            'cung, chuan hoa goc cua tung encoder | dau doc hoc lai tu dau o moi kho | moi ben TB cac hat | test '
+            + '/'.join(f'{v:,}'.replace(',', '.') for v in n_img) + ' anh, 21 lop so chinh')
+    out = dict(dieu_kien=cond, hang=rows, chua_du_cap=gaps, delta=[], tach_lr=[], b_tru_x=[], bang=[])
+    ctx['cat_giua'], ctx['hinh_cat_giua'] = out, {}
+    log(f'=== PHEP THU CAT GIUA — bang + hinh RIENG (PLAN_89 5.3) | {cond} ===')
+    if gaps:
+        log(f"    chua du cap (thieu luot o mot kho, hoac hai kho khac thu tu anh): {', '.join(gaps)}")
+    if not rows:
+        log('    CHUA CO hang nao du ca hai kho -> khong co bang / hinh')
+        return out
+    log('cach doc: Δ = kho CAT GIUA − kho DEM VUONG, cung encoder, cung dau. Ba so moi o: AP bac thang (so cua luat) / AUPRC hinh thang / AUROC, deu macro 21 lop. '
+        '[..] = CI95 DANH NGHIA cua Δ AP21 (bootstrap ghep cap theo anh; co dieu kien tren dau da hoc + lr da chon — KHONG chua bien thien chon lr / huan luyen). '
+        'CI chua 0 = CHUA phat hien khac. Luat (khoang dong thoi max-T): cuoi C6. Ba thu doi cung luc giua hai kho (vien den, phan bi cat, co giai phau) -> '
+        'khong quy rieng cho vien den.')
+    verdicts = {(p['dang'], p['dau'], p['encoder']): p for f in ((ctx.get('so_sanh') or {}).get('hinh_hoc') or {}).values() for p in f['phep_so']}
+
+    log('\n--- Bang 1 · Δ nhanh LUAT (moi kho: lr co AUROC val cao nhat) ---')
+    log(f"{'hang (anh, vector)':<30}{'dau':<11}{'lr dv -> cg':>16}  {'AP21 dv':>8}{'AP21 cg':>8}  {'Δ AP / AUPRC / AUROC':<26}{'CI95 Δ AP21':<19}{'hai nua':<17}"
+        f"{'Δ tung hat':<38}luat (a) o C6")
+    for e in rows:
+        for h in HEADS:
+            a1, a0 = cell(GEO_FAM, e, h), cell(PAD_FAM, e, h)
+            if not _pair_ok(a1, a0):
+                continue
+            r, d3, seeds = CP.diff(a1, a0), _d3([a1], [a0]), _per_seed((1, a1), (-1, a0))
+            v = verdicts.get(('a', h, e))
+            lab = '(chay C6 truoc)' if v is None else v['ket_luan'] + (f" [{_d(v['ci_dong_thoi'][0])}, {_d(v['ci_dong_thoi'][1])}]" if v.get('ci_dong_thoi') else '')
+            log(f"{_row(e):<30}{CL.TITLES[h]:<11}{a0['lr']:>7g} -> {a1['lr']:<6g}  {_f(a0['diem']['p21']['ap']):>8}{_f(a1['diem']['p21']['ap']):>8}  {_t3(d3):<26}"
+                f"[{_d(r['ci'][0])}, {_d(r['ci'][1])}]  {_d(r['nua'][0])} / {_d(r['nua'][1])}  {' '.join(_d(s) for s in seeds):<38}{lab}")
+            out['delta'].append(dict(encoder=e, dau=h, lr_dem_vuong=a0['lr'], lr_cat_giua=a1['lr'], AP21_dem_vuong=a0['diem']['p21']['ap'],
+                                     AP21_cat_giua=a1['diem']['p21']['ap'], d=d3, ci_danh_nghia=r['ci'], nua=r['nua'], tung_hat=seeds,
+                                     d_p7=_d3([a1], [a0], 'p7'), d_p28=_d3([a1], [a0], 'p28'), luat_a=None if v is None else v['ket_luan'],
+                                     ci_dong_thoi=None if v is None else v.get('ci_dong_thoi')))
+            out['bang'].append(_cg_row('1_delta_nhanh_luat', e, h, 'luat', 'cat giua - dem vuong', a0['lr'], a1['lr'], d3, r, ghi_chu=lab))
+
+    log("\n--- Bang 2 · TACH PHAN CHON LR (MO TA; cach 'cung lr' va 'theo AP' dat SAU khi thay ket qua 17/11 — khong thuoc luat dat truoc) ---")
+    log("    luat    = moi kho lay lr co AUROC val cao nhat (Bang 1) | cung lr = lr co dau hoc xong pha 2 o CA HAI kho (nhanh luat hoac nhanh 'theo AP' cua tung "
+        "kho; khong co -> khong so duoc) | theo AP = moi kho lay lr co AP val cao nhat")
+    log(f"{'hang':<16}{'dau':<11}{'cach':<9}{'lr dv -> cg':>16}  {'Δ AP / AUPRC / AUROC':<26}CI95 Δ AP21 (danh nghia)")
+    vals = {}
+    for e in rows:
+        for h in HEADS:
+            a1, a0 = cell(GEO_FAM, e, h), cell(PAD_FAM, e, h)
+            if not _pair_ok(a1, a0):
+                continue
+            items = [('luat', a0, a1, '')]
+            A1, A0 = _arm_cells(o, GEO_FAM, e, h), _arm_cells(o, PAD_FAM, e, h)
+            same = [lr for lr in sorted(set(A1) & set(A0)) if _pair_ok(A1[lr][1], A0[lr][1])]
+            items += [('cung_lr', A0[lr][1], A1[lr][1], f'nhanh dv {A0[lr][0]}, cg {A1[lr][0]}') for lr in same]
+            p1, p0 = _ap_cell(ctx, GEO_FAM, e, h), _ap_cell(ctx, PAD_FAM, e, h)
+            if p1 and p0 and _pair_ok(p1[1], p0[1]):
+                items.append(('ap', p0[1], p1[1], f'nhanh dv {p0[0]}, cg {p1[0]}'))
+            for k, (mode, c0, c1, why) in enumerate(items):
+                r, d3 = CP.diff(c1, c0), _d3([c1], [c0])
+                vals.setdefault((e, h, mode), []).append(d3['ap'])
+                log(f"{(SPECS[e].title if k == 0 else ''):<16}{(CL.TITLES[h] if k == 0 else ''):<11}{CROP_MODE_TEXT[mode]:<9}{c0['lr']:>7g} -> {c1['lr']:<6g}  {_t3(d3):<26}"
+                    f"[{_d(r['ci'][0])}, {_d(r['ci'][1])}]" + (f'  ({why})' if why else ''))
+                out['tach_lr'].append(dict(encoder=e, dau=h, cach=mode, lr_dem_vuong=c0['lr'], lr_cat_giua=c1['lr'], d=d3, ci_danh_nghia=r['ci'], nua=r['nua'], nhanh=why))
+                out['bang'].append(_cg_row('2_tach_chon_lr', e, h, mode, 'cat giua - dem vuong', c0['lr'], c1['lr'], d3, r, ghi_chu=why))
+            if not same:
+                log(f"{'':<27}{'cung lr':<9}{'-':>16}  khong co lr nao hoc xong o ca hai kho")
+
+    ref_ok = reference in rows
+    lead = {}
+    if ref_ok:
+        t = SPECS[reference].title
+        log(f"\n--- Bang 3 · {t} − X tren TUNG kho va thay doi cua no (= Δ_{t} − Δ_X; am = khoang cach cua {t} co lai khi bo dem vuong) ---")
+        log(f"    moi o ba so: AP / AUPRC / AUROC (21 lop); dv = kho dem vuong, cg = kho cat giua; thay doi = ({t} − X cg) − ({t} − X dv)")
+        log(f"{'X':<14}{'dau':<11}{'cach':<9}{t + ' − X dv':<26}{t + ' − X cg':<26}{'hai nua AP21 cg':<17}{'thay doi':<26}CI95 thay doi AP21 (danh nghia)")
+        for x in rows:
+            if x == reference:
+                continue
+            for h in HEADS:
+                quads = [('luat', cell(GEO_FAM, reference, h), cell(PAD_FAM, reference, h), cell(GEO_FAM, x, h), cell(PAD_FAM, x, h))]
+                ap = [_ap_cell(ctx, f, e, h) for f, e in ((GEO_FAM, reference), (PAD_FAM, reference), (GEO_FAM, x), (PAD_FAM, x))]
+                if all(ap):
+                    quads.append(('ap',) + tuple(c for _, c in ap))
+                for k, (mode, b1, b0, x1, x0) in enumerate(quads):
+                    if any(c is None for c in (b1, b0, x1, x0)) or not all(_pair_ok(b1, c) for c in (b0, x1, x0)):
+                        continue
+                    r0, r1, rr = CP.diff(b0, x0), CP.diff(b1, x1), CP.diff_of_diffs(b1, b0, x1, x0)
+                    d0, d1, dd = _d3([b0], [x0]), _d3([b1], [x1]), _d3([b1, x0], [b0, x1])
+                    if mode == 'luat':
+                        lead[(x, h)] = (d0['ap'], d1['ap'])
+                    log(f"{(SPECS[x].title if k == 0 else ''):<14}{(CL.TITLES[h] if k == 0 else ''):<11}{CROP_MODE_TEXT[mode]:<9}{_t3(d0):<26}{_t3(d1):<26}"
+                        f"{_d(r1['nua'][0])} / {_d(r1['nua'][1])}  {_t3(dd):<26}[{_d(rr['ci'][0])}, {_d(rr['ci'][1])}]")
+                    out['b_tru_x'].append(dict(doi_chung=x, dau=h, cach=mode, dem_vuong=d0, ci_dem_vuong=r0['ci'], cat_giua=d1, ci_cat_giua=r1['ci'],
+                                               nua_cat_giua=r1['nua'], thay_doi=dd, ci_thay_doi=rr['ci']))
+                    for chieu, d3, r in ((f'{t} - X tren kho dem vuong', d0, r0), (f'{t} - X tren kho cat giua', d1, r1),
+                                         (f'({t} - X cat giua) - ({t} - X dem vuong)', dd, rr)):
+                        out['bang'].append(_cg_row('3_b_tru_x', x, h, mode, chieu, b0['lr'], b1['lr'], d3, r, ghi_chu=f'lr cua X: dv {x0["lr"]:g}, cg {x1["lr"]:g}'))
+    else:
+        log(f'\n--- Bang 3: chua co hang {reference.upper()} du ca hai kho -> khong co ---')
+
+    et, ht = {e: SPECS[e].title for e in ORDER}, CL.TITLES
+    flat = {k[:4]: v for k, v in o.items() if k[4] == 'luat'}
+    base = (f"Ver2, kho không cân bằng histogram ở cả hai bên; backbone đông cứng, đầu đọc học lại từ đầu ở mỗi kho; mỗi bên trung bình các hạt; test "
+            f"{'/'.join(f'{v:,}'.replace(',', '.') for v in n_img)} ảnh, 21 lớp chính. Điểm MÔ TẢ, không khoảng tin cậy ở hình — CI danh nghĩa ở bảng cùng ô, luật "
+            'và khoảng đồng thời max-T ở C6. Ba thứ đổi cùng lúc giữa hai kho: viền đen, phần bị cắt ở hai đầu cạnh dài, cỡ giải phẫu trong khung (PLAN_89 §5.3).'
+            + (f" Chưa đủ cặp: {', '.join(gaps)}." if gaps else ''))
+    figs = {}
+    f = FG.cond_diff(flat, rows, HEADS, GEO_FAM, PAD_FAM, FG.METRICS, et, ht, 'cắt giữa', 'đệm vuông', base + ' Nhánh luật: mỗi kho lấy lr có AUROC val cao nhất.',
+                     panel='p21')
+    if f is not None:
+        figs['hieu_21'] = f
+    f = FG.delta_modes(vals, rows, HEADS, CROP_MODES, et, ht, CROP_MODE_TITLE,
+                       'Δ AP 21 lớp (bậc thang) cắt giữa − đệm vuông theo ba cách chọn lr — mỗi ô một đầu đọc, mỗi hàng một encoder', 'Δ AP 21',
+                       base + ' Cùng lr: chỉ các lr có đầu học xong ở CẢ hai kho (không có -> không có chấm; hai lr chung -> hai chấm). Cách "cùng lr" và "theo AP" '
+                       'đặt sau khi thấy kết quả (17/11) — không thuộc luật đặt trước. Đường đứt: ±0,01 (ngưỡng của luật).', margin=GEO.MARGIN)
+    if f is not None:
+        figs['tach_chon_lr'] = f
+    if lead:
+        t = SPECS[reference].title
+        others = [x for x in rows if x != reference and any((x, h) in lead for h in HEADS)]
+        f = FG.lead_shift({k: v[0] for k, v in lead.items()}, {k: v[1] for k, v in lead.items()}, others, HEADS, et, ht, ('kho đệm vuông', 'kho cắt giữa'),
+                          f'{t} − X trên AP 21 lớp (bậc thang): kho đệm vuông -> kho cắt giữa — mỗi ô một đầu đọc, mỗi hàng một X', f'{t} − X · AP 21',
+                          base + f' Nhánh luật. Chấm đặc nằm bên trái chấm rỗng = khoảng cách của {t} so với X co lại khi bỏ đệm vuông.')
+        if f is not None:
+            figs['b_tru_x'] = f
+    ctx['hinh_cat_giua'] = figs
+    log(f"\n{len(out['delta'])} o Δ, {len(out['tach_lr'])} dong tach lr, {len(out['b_tru_x'])} dong {SPECS[reference].title} − X | {len(figs)} hinh rieng: {sorted(figs)} "
+        '(ghi tep cat_giua_* o C8)')
+    if show:
+        import matplotlib.pyplot as plt
+        plt.show()
+    return out
+
+
 def _jsonable(obj):
     return json.loads(json.dumps(obj, default=lambda v: v.item() if hasattr(v, 'item') else str(v)))
 
@@ -500,6 +689,28 @@ def sync(ctx, log=print):
     for name, fig in ctx.get('hinh', {}).items():
         names.append(f'hinh_{name}_{t}.png')
         d['ghi'](names[-1], lambda q, fig=fig: fig.savefig(q, dpi=160, bbox_inches='tight'))
+    cg, n_cg = ctx.get('cat_giua') or {}, 0
+    if cg.get('bang'):                                            # 0.9.2: phép thử cắt giữa (C7b) — tệp RIÊNG, tiền tố cat_giua_ (không trộn vào tệp tổng hợp)
+        cg_obj = _jsonable(dict(run=d['RUN_TAG'], t=t, goi=ctx['goi'], n_boot=ctx['n_boot'], **{k: v for k, v in cg.items() if k != 'bang'},
+                                ghi_chu='Δ = kho cat giua - kho dem vuong (Ver2, khong can bang); AP bac thang / AUPRC hinh thang / AUROC macro 21 lop; CI danh nghia '
+                                        "theo anh; 'cung lr' va 'theo AP' la phan tich mo ta dat sau khi thay ket qua (17/11); luat o so_sanh.hinh_hoc cua tep tong hop"))
+        names.append(f'cat_giua_89_{t}.json')
+        d['ghi'](names[-1], lambda q: d['ghi_json'](q, cg_obj))
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=list(cg['bang'][0]))
+        w.writeheader()
+        w.writerows(cg['bang'])
+        cg_text = buf.getvalue()
+        names.append(f'cat_giua_bang_89_{t}.csv')
+
+        def _cg_csv(q):
+            with open(q, 'w', encoding='utf-8-sig', newline='') as f:
+                f.write(cg_text)
+        d['ghi'](names[-1], _cg_csv)
+        for name, fig in ctx.get('hinh_cat_giua', {}).items():
+            names.append(f'cat_giua_hinh_{name}_{t}.png')
+            d['ghi'](names[-1], lambda q, fig=fig: fig.savefig(q, dpi=160, bbox_inches='tight'))
+        n_cg = 2 + len(ctx.get('hinh_cat_giua', {}))
     n_cache = 0
     if ctx.get('bo_dem_moi'):                                     # có bộ mới tính -> ghi bộ nhớ đệm đầy đủ (lần sau chỉ tính lượt mới)
         names.append(f'bo_dem_bootstrap_{t}.npz')
@@ -509,6 +720,7 @@ def sync(ctx, log=print):
     on = d['ten_tren_drive']()
     co = set(names) <= on
     log(f"C8: da ghi {len(names)} tep (1 JSON, {'1 CSV, ' if rows else ''}{len(ctx.get('hinh', {}))} PNG"
+        + (f"; phep thu cat giua RIENG {n_cg} tep cat_giua_* (1 JSON, 1 CSV, {n_cg - 2} PNG)" if n_cg else '; phep thu cat giua: khong co (C7b chua chay / chua du cap)')
         + (f", bo nho dem bootstrap {len(ctx['bo_dem'])} bo" if n_cache else ', bo nho dem khong doi') + f") | dong_bo {'DU' if du else 'CHUA DU'} | tren Drive: "
         f"{'CO du' if co else 'THIEU'}" + ('' if du and co else ' | KHONG tat runtime; chay lai C8'))
     return dict(dong_bo=du, du_tep=co, tep=names)
