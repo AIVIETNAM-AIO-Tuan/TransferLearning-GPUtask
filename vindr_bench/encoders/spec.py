@@ -122,6 +122,19 @@ SPECS = {s.name: s for s in (
                 drive_dir='cxrlt_2024/stage4_nb78x/r78x_J_v3b_dp_ema_v2_skip7_s42', drive_file='rs_J_bert_dong_ep5.pt',
                 file_md5='93cf2f85cd3c191fbb6cce0304f2de17', file_size=537538740,
                 extra_files=(('backbone_ft.pt', '192def5e64e468520754ad5fcb7c83cc', 537515907),)),
+    # 0.10.0 (PLAN_90 Việc A, Tuấn duyệt 17/11): encoder có giám sát giải phẫu của người khác — hàng THÊM, không thuộc 9 hàng đã khoá (EXTRA_ROWS bên dưới)
+    EncoderSpec('asg', 'ASG (ViT-B/16)', 'ViT-B/16 (lớp ViT của họ = timm vit_base_patch16_224; khởi tạo DeiT-B ImageNet)', 224, 16, 768,
+                IMAGENET_MEAN, IMAGENET_STD, 'cls',
+                'Drive tác giả (README ASGMVLP/ASGMVLP_CODE @ 110f3f4, mục 01/2026): asg_vit.ckpt — {state_dict} của mô hình tiền huấn luyện đầy đủ, dùng 150 '
+                'khoá encoder ảnh img_encoder_q.model.*', 'repo không có LICENSE (README chỉ có huy hiệu "License: Physionet")',
+                'MIMIC-CXR (217 nghìn cặp ảnh thẳng – report); vùng lấy từ Faster R-CNN học trên Chest ImaGenome, bộ ba từ RadGraph', 'da_dung',
+                'models/vit.py + models/encoder.py + datasets/pretrain_dataset.py @ 110f3f4 (đọc 17/11) + tệp thật 17/11',
+                'vector toàn ảnh = CLS sau norm cuối = img_feat[:, 0] của ImageEncoder (TRƯỚC đầu chiếu global_embed, chỉ dùng cho loss tiền huấn luyện); token '
+                'patch = img_feat[:, 1:]. Tiền xử lý gốc: co cạnh dài 256 + ĐỆM VUÔNG + cắt 224 -> kho đệm vuông là kiểu ảnh gốc, không chạy kho cắt giữa. So '
+                'với B là so HAI HỆ THỐNG (khác khởi tạo, 224 so với 518, mục tiêu) — họ phép so riêng (PLAN_90 §2)',
+                drive_dir='cxrlt_2024/asg', drive_file='asg_vit.ckpt', file_md5='d50b724f7e3284d010ea4f4985e765e8', file_size=734485971),
 )}
-ORDER = ('b', 'chexfound', 'raddino', 'biomedclip', 'mrm', 'chexzero', 'evax', 'pubmedclip', 'chexworld')
-assert set(ORDER) == set(SPECS) and len(ORDER) == 9
+ORDER = ('b', 'chexfound', 'raddino', 'biomedclip', 'mrm', 'chexzero', 'evax', 'pubmedclip', 'chexworld')   # 9 hàng của giao thức (khoá 13/11): họ phép so 32
+EXTRA_ROWS = ('asg',)                 # hàng thêm SAU khi giao thức đã khoá (0.10.0): bảng + hình có, KHÔNG vào họ 32 phép — họ riêng (PLAN_90 §2)
+ALL_ROWS = ORDER + EXTRA_ROWS
+assert set(ALL_ROWS) == set(SPECS) and len(ORDER) == 9 and not set(ORDER) & set(EXTRA_ROWS)

@@ -27,7 +27,7 @@ import time
 import numpy as np
 
 from .. import __version__
-from ..encoders import ORDER, SPECS
+from ..encoders import ALL_ROWS, EXTRA_ROWS, ORDER, SPECS
 from ..evaluation import collect as CL
 from ..evaluation import compare as CP
 from ..evaluation import figures as FG
@@ -81,7 +81,7 @@ def setup(ns, log=print):
 
 def collect(ctx, log=print):
     '''C3. Kiểm kê + tải. -> dict của evaluation.collect.collect.'''
-    dl = CL.collect(ctx['drive'], [e for e in ORDER], CL.V2_STORES, log=log)
+    dl = CL.collect(ctx['drive'], [e for e in ALL_ROWS], CL.V2_STORES, log=log)
     ctx['dl'] = dl
     log('--- kiem ke luot (so bo du doan test da tai) ---')
     for k, n in dl['co'].items():
@@ -162,7 +162,7 @@ def score(ctx, log=print, n_boot=P.N_BOOT, workers=None):
 
 
 def _encs(ctx, fam, arm='luat'):
-    return [e for e in ORDER if any((fam[0], fam[1], e, h, arm) in ctx['o'] for h in HEADS)]
+    return [e for e in ALL_ROWS if any((fam[0], fam[1], e, h, arm) in ctx['o'] for h in HEADS)]
 
 
 def tables(ctx, log=print):
@@ -202,9 +202,9 @@ def tables(ctx, log=print):
     side = {}
     for h in HEADS:
         log(f"--- {CL.TITLES[h]} --- {'hang':<28}" + ''.join(f'{FAM_SHORT[f]:>12}{"hang thu":>9}' for f in FAMS))
-        val = {f: {e: ctx['o'][(f[0], f[1], e, h, 'luat')]['diem']['p21']['ap'] for e in ORDER if (f[0], f[1], e, h, 'luat') in ctx['o']} for f in FAMS}
+        val = {f: {e: ctx['o'][(f[0], f[1], e, h, 'luat')]['diem']['p21']['ap'] for e in ALL_ROWS if (f[0], f[1], e, h, 'luat') in ctx['o']} for f in FAMS}
         rank = {f: {e: 1 + sorted(v.values(), reverse=True).index(x) for e, x in v.items()} for f, v in val.items()}
-        for e in [e for e in ORDER if any(e in val[f] for f in FAMS)]:
+        for e in [e for e in ALL_ROWS if any(e in val[f] for f in FAMS)]:
             log(f"{'':<4}{SPECS[e].title + ' ' + str(SPECS[e].image_size):<28}" + ''.join(f'{_f(val[f].get(e)):>12}{rank[f].get(e, "-"):>9}' for f in FAMS))
         sp = {}
         for a, b in ((FAMS[0], FAMS[1]), (FAMS[1], FAMS[2]), (PAD_FAM, GEO_FAM)):
@@ -222,7 +222,7 @@ def _pair_ok(a, b):
 
 def compare(ctx, log=print, reference=REFERENCE):
     '''C6. Hiệu ghép cặp (CHỈ MÔ TẢ trừ họ max-T). -> dict.'''
-    o, out = ctx['o'], dict(giua_encoder={}, ho_tham_chieu={}, giua_dau={}, giua_kho=[], nhanh_ap=[])
+    o, out = ctx['o'], dict(giua_encoder={}, ho_tham_chieu={}, ho_them={}, giua_dau={}, giua_kho=[], nhanh_ap=[])
     cell = lambda fam, e, h, arm='luat': o.get((fam[0], fam[1], e, h, arm))
     log("cach doc: hieu = hang - cot tren mAP21, ghep cap theo anh (cung lan rut); [..] = CI95 DANH NGHIA; dau '+' / '-' = dat dang luat 7.4 mot cach danh "
         "nghia (|hieu| >= 0,01, CI khong chua 0, cung dau o hai nua); CI chua 0 = CHUA phat hien khac, khong phai 'bang nhau'. Ver1: mot hat.")
@@ -249,7 +249,7 @@ def compare(ctx, log=print, reference=REFERENCE):
         if fam == GEO_FAM:
             log(f'--- {SPECS[reference].title} - X tren kho cat giua: LUAT o phan (c) cua hai ho hinh hoc (cuoi C6), khong lap ho 32 phep o day ---')
         elif reference in encs:
-            comps = [(h, x) for h in HEADS for x in encs if x != reference and (h, reference, x) in table]
+            comps = [(h, x) for h in HEADS for x in encs if x != reference and x in ORDER and (h, reference, x) in table]   # 9 hàng đã khoá (13/11)
             q, sim = CP.max_t([table[(h, reference, x)] for h, x in comps])
             log(f'--- HO {len(comps)} phep so {SPECS[reference].title} - X (luat PLAN_89 7.4), khoang DONG THOI max-T 95 %: q = {q:.2f} ---')
             for (h, x), s in zip(comps, sim):
@@ -257,6 +257,16 @@ def compare(ctx, log=print, reference=REFERENCE):
                 log(f"{'':<4}{CL.TITLES[h]:<11}{SPECS[reference].title} - {SPECS[x].title:<12} {_d(s['d'])} dong thoi [{_d(s['ci_dong_thoi'][0])}, {_d(s['ci_dong_thoi'][1])}] | danh nghia "
                     f"[{_d(r['ci'][0])}, {_d(r['ci'][1])}] | hai nua {_d(r['nua'][0])} / {_d(r['nua'][1])} -> {s['ket_luan']}")
             out['ho_tham_chieu'][FAM_SHORT[fam]] = dict(tham_chieu=reference, q=q, phep_so=[dict(dau=h, doi_chung=x, **s) for (h, x), s in zip(comps, sim)])
+            extra = [(h, x) for h in HEADS for x in encs if x in EXTRA_ROWS and (h, reference, x) in table]
+            if extra:                                # 0.10.0 (PLAN_90 §2): hàng thêm sau khi giao thức khoá — họ RIÊNG, max-T riêng, cùng dạng luật 7.4
+                qe, sime = CP.max_t([table[(h, reference, x)] for h, x in extra])
+                log(f"--- HO RIENG {len(extra)} phep so {SPECS[reference].title} - hang them {[SPECS[x].title for x in EXTRA_ROWS if any(x == y for _, y in extra)]} "
+                    f"(dat 17/11 truoc moi ket qua cua hang them; KHONG thuoc ho {len(comps)} phep tren; so HAI HE THONG), khoang DONG THOI max-T 95 %: q = {qe:.2f} ---")
+                for (h, x), s in zip(extra, sime):
+                    r = table[(h, reference, x)]
+                    log(f"{'':<4}{CL.TITLES[h]:<11}{SPECS[reference].title} - {SPECS[x].title:<16} {_d(s['d'])} dong thoi [{_d(s['ci_dong_thoi'][0])}, {_d(s['ci_dong_thoi'][1])}] | "
+                        f"danh nghia [{_d(r['ci'][0])}, {_d(r['ci'][1])}] | hai nua {_d(r['nua'][0])} / {_d(r['nua'][1])} -> {s['ket_luan']}")
+                out['ho_them'][FAM_SHORT[fam]] = dict(tham_chieu=reference, q=qe, phep_so=[dict(dau=h, doi_chung=x, **s) for (h, x), s in zip(extra, sime)])
         else:
             log(f'--- chua co hang {reference.upper()} trong dieu kien nay -> CHUA ap luat 7.4 (ho B - X + max-T); cac hieu tren chi la danh nghia ---')
         log(f"--- hieu giua DAU DOC (cung encoder) --- {'hang':<16}" + ''.join(f"{CL.TITLES[a] + ' - ' + CL.TITLES[b]:>36}" for a, b in HEAD_PAIRS))
@@ -273,7 +283,7 @@ def compare(ctx, log=print, reference=REFERENCE):
             log(line)
         out['giua_dau'][FAM_SHORT[fam]] = hd
     log('\n=== Ver2: kho CO can bang - kho KHONG can bang (cung encoder, cung dau; hai luot hoc rieng -> CI theo anh thieu bien thien huan luyen; mo ta) ===')
-    for e in ORDER:
+    for e in ALL_ROWS:
         line, any_ = f"{'':<4}{SPECS[e].title:<16}", False
         for h in HEADS:
             a, b = cell(('v2', 'cb'), e, h), cell(('v2', 'kcb'), e, h)
@@ -289,7 +299,7 @@ def compare(ctx, log=print, reference=REFERENCE):
         log('    chua co cap luot nao du hai kho (hoac hai kho khac thu tu anh)')
     log("\n=== Ver2: nhanh 'theo AP' (lr co AP val cao nhat) - LUAT (lr co AUROC val cao nhat), chi cac o hai lr KHAC nhau; mo ta, khong vao luat ===")
     for fam in FAMS[1:]:
-        for e in ORDER:
+        for e in ALL_ROWS:
             for h in HEADS:
                 a, b = cell(fam, e, h, 'ap'), cell(fam, e, h)
                 if not _pair_ok(a, b):
@@ -414,7 +424,7 @@ def figures(ctx, log=print, show=True):
     flat = {k[:4]: v for k, v in o.items() if k[4] == 'luat'}
     conds = [f for f in FAMS if _encs(ctx, f)]
     dot_conds = [f for f in conds if f in FG.COND]           # chấm: tối đa 3 điều kiện (màu chấm phải phân biệt MỌI cặp) -> kho cắt giữa ở lưới + hình hiệu
-    encs = [e for e in ORDER if any(k[2] == e for k in flat)]
+    encs = [e for e in ALL_ROWS if any(k[2] == e for k in flat)]
     order = sorted(encs, key=lambda e: -max(v['diem'][FG.PANEL]['ap'] for k, v in flat.items() if k[2] == e))      # cùng thứ tự ở mọi hình
     et, ht = {e: SPECS[e].title for e in encs}, CL.TITLES
     base = _note28(ctx)
@@ -624,7 +634,7 @@ def crop_test(ctx, log=print, show=True, reference=REFERENCE):
     else:
         log(f'\n--- Bang 3: chua co hang {reference.upper()} du ca hai kho -> khong co ---')
 
-    et, ht = {e: SPECS[e].title for e in ORDER}, CL.TITLES
+    et, ht = {e: SPECS[e].title for e in ALL_ROWS}, CL.TITLES
     flat = {k[:4]: v for k, v in o.items() if k[4] == 'luat'}
     base = (f"Ver2, kho không cân bằng histogram ở cả hai bên; backbone đông cứng, đầu đọc học lại từ đầu ở mỗi kho; mỗi bên trung bình các hạt; test "
             f"{'/'.join(f'{v:,}'.replace(',', '.') for v in n_img)} ảnh, 21 lớp chính. Điểm MÔ TẢ, không khoảng tin cậy ở hình — CI danh nghĩa ở bảng cùng ô, luật "
