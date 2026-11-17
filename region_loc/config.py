@@ -44,8 +44,11 @@ FINDINGS = ('Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Lung Opaci
 assert len(LAB40) == N_LABELS and all(f in LAB40 for f in FINDINGS)
 
 # ---- cổng (ngưỡng có lý do đo được; không chép từ luật khác) ----
-# toạ độ 224 trong tệp gold phải khớp letterbox 224 của (hộp gốc, W, H): đo ở máy trên 18.398 hộp train — trung vị 0,07 px, lớn nhất 0,14 px
-TOL_224_PX, MIN_SHARE_224 = 1.0, 0.99
+# Toạ độ 224 trong tệp gold phải khớp letterbox 224 của (hộp gốc, W, H của METADATA). Nền ở ĐÚNG điều kiện chạy (kích thước từ metadata MIMIC-CXR-JPG,
+# 18.398 hộp gold train): 78f C3 (05/10) — trung vị 0,06 px, 100 % <= 3 px (cổng của 78f: 3 px / 95 %); Colab 18/11 — 98,26 % <= 1 px. Cổng dùng
+# dung sai 3 px của 78f + chặn trung vị. (0.1.0 đặt 1 px / 99 % theo số đo ở máy với kích thước DỰNG LẠI từ tệp đệm 224 của chính ImaGenome — lớn nhất
+# 0,14 px — không phải điều kiện chạy -> dừng oan ở lượt đầu; sửa ở 0.1.1.) Sai W / H thật (vd đổi chỗ) cho lệch hàng chục px ở phần lớn hộp.
+TOL_224_PX, MIN_SHARE_224, MAX_MEDIAN_224_PX = 3.0, 0.99, 0.5
 # thứ tự vùng: IoU(hop_tb[k], hộp gold trung bình của tên k) — đo ở máy: nhỏ nhất 0,72; mọi vùng khớp nhất với chính nó
 MIN_ORDER_IOU = 0.5
 # cổng "đường chấm sống": IoU của luồng vùng trên gold train phải hơn sàn "hộp trung bình" (đo ở máy: 0,394) ít nhất chừng này;

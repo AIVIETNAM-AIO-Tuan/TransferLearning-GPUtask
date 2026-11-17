@@ -116,8 +116,10 @@ def data(ctx):
     gold, g224 = T.gold_frame(gold, sizes, names)
     auto = T.auto_frame(auto, gold, names)
     ms = T.mscxr_frame(ms)
-    log(f"cong hinh hoc (toa do 224 cua tep gold so voi letterbox 224 tu hop goc + kich thuoc metadata): {g224['share_224']:.2%} hop lech <= {C.TOL_224_PX} px "
-        f"(trung vi {g224['err_224_median']:.3f}, lon nhat {g224['err_224_max']:.2f} px) -> DAT")
+    log(f"cong hinh hoc (toa do 224 cua tep gold so voi letterbox 224 tu hop goc + kich thuoc metadata): {g224['share_224']:.2%} hop lech <= {C.TOL_224_PX:g} px "
+        f"(can {C.MIN_SHARE_224:.0%}), trung vi {g224['err_224_median']:.3f} px (can <= {C.MAX_MEDIAN_224_PX}) -> DAT | phan bo: <= 1 px {g224['share_1px']:.2%}, "
+        f"p99 {g224['err_224_p99']:.2f}, lon nhat {g224['err_224_max']:.2f} px; anh co hop lech > 1 px: {g224['n_anh_lech_1px']} / {g224['n_anh']}, "
+        f"> {C.TOL_224_PX:g} px: {g224['n_anh_lech']}")
     ids = sorted(set(gold.dicom_id) | set(ms.dicom_id))
     st = IM.fetch_images(drive, ids, IMAGE_DIR, log)
     log(f"anh: {st['n_can']} can | {st['n_co_san']} co san | {st['n_lay']} lay tu {st['n_tar_doc']} / {st['n_tar']} tep .tar cua kho 518")

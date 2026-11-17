@@ -113,12 +113,17 @@ def gold_frame(gold, sizes, names):
     g = gold.join(sizes, on='dicom_id')
     assert g.W.notna().all(), 'gold: thieu kich thuoc anh -> DUNG'
     err = G.letterbox_224_error(g.original_x1, g.original_y1, g.original_x2, g.original_y2, g.W, g.H, g[_BOX224].to_numpy())
-    share = float((err <= C.TOL_224_PX).mean())
-    assert share >= C.MIN_SHARE_224, (f'gold: chi {share:.2%} hop khop toa do 224 (<= {C.TOL_224_PX} px; can {C.MIN_SHARE_224:.0%}) -> sai W / H hoac hinh hoc '
-                                      f'letterbox -> DUNG')
+    share, med = float((err <= C.TOL_224_PX).mean()), float(np.median(err))
+    st = dict(share_224=share, err_224_median=med, err_224_p99=float(np.quantile(err, 0.99)), err_224_max=float(err.max()),
+              share_1px=float((err <= 1.0).mean()), n_hop_lech=int((err > C.TOL_224_PX).sum()),
+              n_anh_lech=int(g.dicom_id[err > C.TOL_224_PX].nunique()), n_anh_lech_1px=int(g.dicom_id[err > 1.0].nunique()), n_anh=int(g.dicom_id.nunique()))
+    assert share >= C.MIN_SHARE_224 and med <= C.MAX_MEDIAN_224_PX, (
+        f'gold: toa do 224 KHONG khop letterbox 224 cua (hop goc, W, H metadata): {share:.2%} hop lech <= {C.TOL_224_PX} px (can {C.MIN_SHARE_224:.0%}), '
+        f"trung vi {med:.3f} px (can <= {C.MAX_MEDIAN_224_PX}); p99 {st['err_224_p99']:.2f}, lon nhat {st['err_224_max']:.2f} px; {st['n_anh_lech']} / "
+        f"{st['n_anh']} anh co hop lech -> sai W / H hoac hinh hoc letterbox -> DUNG")
     f = G.to_frame(g.original_x1, g.original_y1, g.original_x2, g.original_y2, g.W, g.H)
     g = g.assign(k=g.bbox_name.map(idx).astype('int64'), g1=f[:, 0], g2=f[:, 1], g3=f[:, 2], g4=f[:, 3])
-    return g, dict(share_224=share, err_224_median=float(np.median(err)), err_224_max=float(err.max()))
+    return g, st
 
 
 def auto_frame(auto, gold_framed, names):
