@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
 """Ô của notebook `90c_dinh_vi_*` (PLAN_90 §11). Mỗi hàm = một ô; trạng thái đi theo dict CTX; mọi việc Drive qua hàm của khối Drive chuẩn ở C0.
 
-    C2 setup     khối Drive + thiết bị + phiên bản hai gói + chế độ (định cỡ trên phần train | val + test khi ngưỡng đã khoá)
-    C3 data      tệp hộp (sha256 ghim) + split CXR-LT + CỔNG số đếm ghim -> chỉ giữ phần được phép -> khung toạ độ + cổng hình học -> ảnh từ kho 518
-    C4 model     tệp trọng số (md5 ghim) -> mô hình + ba đầu (nạp chặt) + cổng thứ tự vùng
-    C5 run       forward mọi ảnh cần (một lượt) -> hộp, điểm theo vùng, attention của 8 dấu hiệu
-    C6 calibrate phần TRAIN (ảnh mô hình đã thấy): sàn / trần / độ rộng khoảng tin cậy của từng số đo -> số để khoá ngưỡng. KHÔNG phải kết quả.
-    C7 evaluate  val + test: chỉ chạy khi config.THRESHOLDS đã khoá (bản gói sau); chưa khoá -> in lý do, không đọc gì
-    C8 sync      dong_bo()
+Hai chế độ, quyết bởi config.THRESHOLDS của commit ghim (không phải cờ trong notebook):
+  dinh_co  (THRESHOLDS None — gói 0.1.x)  chỉ phần TRAIN (ảnh mô hình đã thấy): sàn / trần / độ rộng khoảng tin cậy để khoá ngưỡng
+  val_test (THRESHOLDS đã khoá — từ 0.2.0) chỉ val + test (bệnh nhân chưa thấy), đọc MỘT lần, áp luật đã khoá
+
+    setup      khối Drive + thiết bị + phiên bản hai gói + chế độ
+    data       tệp hộp (sha256 ghim) + split CXR-LT + CỔNG số đếm ghim -> chỉ giữ phần của chế độ -> khung toạ độ + cổng hình học -> ảnh từ kho 518
+    model      tệp trọng số (md5 ghim) -> mô hình + ba đầu (nạp chặt) + cổng thứ tự vùng (luôn trên hộp gold TRAIN)
+    run        forward mọi ảnh cần (một lượt) -> hộp, điểm theo vùng, attention của 8 dấu hiệu
+    calibrate  (chế độ dinh_co) số định cỡ trên phần train + cổng đường chấm — KHÔNG phải kết quả
+    evaluate   (chế độ val_test) val, test, val + test gộp; luật đã khoá; chưa khoá -> in lý do, không đọc gì
+    sync       dong_bo()
 
 Chỉ in SỐ TỔNG HỢP (luật PhysioNet: không ảnh, không hộp / nhãn từng ảnh trong output); mảng từng đơn vị ghi vào tệp trên Drive."""
 import hashlib
@@ -27,9 +31,17 @@ from . import model as MD
 from . import tables as T
 
 DRIVE_NAMES = ('kiem_ke', 'tai', 'ghi', 'ghi_json', 'dong_bo', 'GHI_LOC', 'RUN_TAG', '_duong', '_liet_ke')
-RUN_TAG = 'r90c_dinh_vi_arre_s42'
 IMAGE_DIR = '/content/anh_518_dinh_vi'
 SOURCES = ('attention', 'nhan_vung', 'bat_thuong')       # ba bản đồ của C2
+SOURCE_NAMES = dict(attention='attention cua dau doc', nhan_vung='diem nhan theo vung', bat_thuong='co bat thuong tung vung')
+
+
+def mode():
+    return 'dinh_co' if C.THRESHOLDS is None else 'val_test'
+
+
+def run_tag(m=None):
+    return C.RUN_TAGS[m or mode()]
 
 
 def drive_api(ns):
@@ -79,15 +91,18 @@ def setup(ns, log=print):
     import torch
     import vindr_bench
     drive = drive_api(ns)
-    assert drive['RUN_TAG'] == RUN_TAG, f"RUN_TAG cua C0 {drive['RUN_TAG']!r} khac {RUN_TAG!r} -> notebook khong phai ban dung cho goi nay -> DUNG"
+    m = mode()
+    assert drive['RUN_TAG'] == run_tag(m), (f"RUN_TAG cua C0 {drive['RUN_TAG']!r} khac {run_tag(m)!r} (che do {m} cua goi {__version__}) -> notebook khong phai "
+                                             f'ban dung cho goi nay -> DUNG')
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
     assert dev == 'cuda', 'can GPU (Runtime > Change runtime type) -> DUNG'
-    mode = 'dinh_co' if C.THRESHOLDS is None else 'val_test'
-    ctx = dict(drive=drive, log=log, device=dev, mode=mode, splits=('train',) if mode == 'dinh_co' else C.SPLITS, t0=time.time())
+    ctx = dict(drive=drive, log=log, device=dev, mode=m, splits=('train',) if m == 'dinh_co' else C.EVAL_SPLITS, t0=time.time())
     log(f"region_loc {__version__} @ {str(ns.get('LOC_SHA', '?'))[:12]} | vindr_bench {vindr_bench.__version__} @ {str(getattr(vindr_bench, 'GOI_SHA', '?'))[:12]} | "
         f"torch {torch.__version__} | {torch.cuda.get_device_name(0)}")
-    log(f"che do: {'DINH CO tren phan TRAIN (nguong chua khoa -> val / test KHONG duoc doc)' if mode == 'dinh_co' else 'val + test (nguong da khoa)'} | "
-        f'RUN_TAG {RUN_TAG} | ghi {C.FOLDER}')
+    if m == 'dinh_co':
+        log(f'che do: DINH CO tren phan TRAIN (nguong chua khoa -> val / test KHONG duoc doc) | RUN_TAG {run_tag(m)} | ghi {C.FOLDER}')
+    else:
+        log(f'che do: VAL + TEST (benh nhan chua thay), doc MOT lan | nguong da khoa 18/11: {C.THRESHOLDS} | RUN_TAG {run_tag(m)} | ghi {C.FOLDER}')
     return ctx
 
 
@@ -102,19 +117,20 @@ def data(ctx):
     for w in (w0, w1, w2, w3, w4, w5):
         log(f'  tep: {w}')
     names, order = T.region_names(p_names), T.read_order(p_order)
-    # ---- đếm theo split TRƯỚC, rồi chỉ giữ phần được phép; hộp của phần còn lại không được dùng ----
+    # ---- đếm theo split TRƯỚC, rồi chỉ giữ phần của chế độ; hộp của phần còn lại không được dùng ----
     gold = T.attach_split(T.read_gold(p_gold), order, 'gold')
     ms = T.attach_split(T.read_mscxr(p_ms), order, 'MS-CXR')
     n_gold, n_ms = T.check_counts(gold, C.GOLD_COUNTS, 'gold ImaGenome'), T.check_counts(ms, C.MSCXR_COUNTS, 'MS-CXR')
     assert gold.bbox_name.nunique() == C.N_GOLD_REGIONS, gold.bbox_name.nunique()
+    gold_tr = T.keep(gold, ('train',))                    # hộp gold TRAIN: chỉ cho cổng thứ tự vùng (không cần ảnh)
     gold, ms = T.keep(gold, ctx['splits']), T.keep(ms, ctx['splits'])
-    auto = T.read_auto(p_auto)
-    auto = auto[auto.dicom_id.isin(set(gold.dicom_id))].reset_index(drop=True)
     log(f"so dem theo split (anh, benh nhan, hop) = so ghim | gold {n_gold} | MS-CXR {n_ms} -> GIU {ctx['splits']}: gold {gold.dicom_id.nunique()} anh / "
         f'{len(gold)} hop, MS-CXR {ms.dicom_id.nunique()} anh / {len(ms)} hop')
-    sizes = T.read_sizes(p_meta, gold.dicom_id.unique())
-    gold, g224 = T.gold_frame(gold, sizes, names)
-    auto = T.auto_frame(auto, gold, names)
+    sizes = T.read_sizes(p_meta, sorted(set(gold.dicom_id) | set(gold_tr.dicom_id)))
+    gold_tr, g224_tr = T.gold_frame(gold_tr, sizes, names)
+    gold, g224 = (gold_tr, g224_tr) if ctx['mode'] == 'dinh_co' else T.gold_frame(gold, sizes, names)
+    auto = T.read_auto(p_auto)
+    auto = T.auto_frame(auto[auto.dicom_id.isin(set(gold.dicom_id))].reset_index(drop=True), gold, names)
     ms = T.mscxr_frame(ms)
     log(f"cong hinh hoc (toa do 224 cua tep gold so voi letterbox 224 tu hop goc + kich thuoc metadata): {g224['share_224']:.2%} hop lech <= {C.TOL_224_PX:g} px "
         f"(can {C.MIN_SHARE_224:.0%}), trung vi {g224['err_224_median']:.3f} px (can <= {C.MAX_MEDIAN_224_PX}) -> DAT | phan bo: <= 1 px {g224['share_1px']:.2%}, "
@@ -122,8 +138,9 @@ def data(ctx):
         f"> {C.TOL_224_PX:g} px: {g224['n_anh_lech']}")
     ids = sorted(set(gold.dicom_id) | set(ms.dicom_id))
     st = IM.fetch_images(drive, ids, IMAGE_DIR, log)
-    log(f"anh: {st['n_can']} can | {st['n_co_san']} co san | {st['n_lay']} lay tu {st['n_tar_doc']} / {st['n_tar']} tep .tar cua kho 518")
-    ctx.update(names=names, gold=gold, auto=auto, ms=ms, ids=ids, cong_224=g224, so_dem=dict(gold=n_gold, mscxr=n_ms))
+    log(f"anh: {st['n_can']} can | {st['n_co_san']} co san | {st['n_lay']} lay tu {st['n_tar_doc']} / {st['n_tar']} tep .tar cua kho 518 | {st['mb']:,} MB trong "
+        f"{st['giay']} giay | cach tai: {st['cach']}")
+    ctx.update(names=names, gold=gold, gold_tr=gold_tr, auto=auto, ms=ms, ids=ids, cong_224=g224, so_dem=dict(gold=n_gold, mscxr=n_ms), tai_anh=st)
     return dict(n_anh=len(ids), gold=len(gold), auto=len(auto), mscxr=len(ms))
 
 
@@ -139,16 +156,11 @@ def model(ctx):
         f"dauv {info['n_dauv']} (nap chat) | kenh nhan-vung {len(info['mil_idx'])} nhan, du 8 dau hieu MS-CXR")
     log(f"nhat ky huan luyen (nhom train giu rieng, hop silver): IoU luong {info['nhat_ky'].get('luong_iou')} | hop trung binh "
         f"{info['nhat_ky'].get('luong_iou_tb')} | AUC bat thuong {info['nhat_ky'].get('luong_auc_bt')}")
-    tr = ctx['gold'][ctx['gold'].split == 'train']
-    if len(tr):
-        og = MD.order_gate(loc.enc.luong.hop_tb.float().cpu().numpy(), tr)
-        log(f"cong thu tu vung (hop_tb cua checkpoint so voi hop gold trung binh theo ten, phan train): {og['n_vung']} vung, IoU TB {og['iou_tb']:.3f}, nho nhat "
-            f"{og['iou_min']:.3f} (>= {C.MIN_ORDER_IOU}); moi vung khop nhat voi chinh no -> DAT")
-        ctx['cong_thu_tu'] = og
-    else:
-        log('cong thu tu vung: khong co hang train trong che do nay -> da kiem o luot dinh co')
+    og = MD.order_gate(loc.enc.luong.hop_tb.float().cpu().numpy(), ctx['gold_tr'])
+    log(f"cong thu tu vung (hop_tb cua checkpoint so voi hop gold trung binh theo ten, hop gold TRAIN): {og['n_vung']} vung, IoU TB {og['iou_tb']:.3f}, nho nhat "
+        f"{og['iou_min']:.3f} (>= {C.MIN_ORDER_IOU}); moi vung khop nhat voi chinh no -> DAT")
     ctx.update(loc=loc, hop_tb=G.cxcywh_to_xyxy(loc.enc.luong.hop_tb.float().cpu().numpy()), mean=float(SPECS[C.ENCODER].mean[0]),
-               std=float(SPECS[C.ENCODER].std[0]), mo_hinh=info)
+               std=float(SPECS[C.ENCODER].std[0]), mo_hinh=info, cong_thu_tu=og)
     torch.cuda.reset_peak_memory_stats()
     return dict(run=info['run'], ep=info['ep'])
 
@@ -177,9 +189,9 @@ def run(ctx):
     return dict(n=n, vram_dinh_gb=round(peak, 2))
 
 
-def _c1(ctx, split):
-    '''C1 trên một split: đơn vị = (ảnh, vùng) có hộp gold. -> (bảng từng đơn vị, tổng hợp).'''
-    g = ctx['gold'][ctx['gold'].split == split]
+def _c1(ctx, splits):
+    '''C1 trên các split `splits`: đơn vị = (ảnh, vùng) có hộp gold. -> (bảng từng đơn vị, tổng hợp).'''
+    g = ctx['gold'][ctx['gold'].split.isin(tuple(splits))]
     rows, k = np.array([ctx['row'][d] for d in g.dicom_id]), g.k.to_numpy()
     gb = g[['g1', 'g2', 'g3', 'g4']].to_numpy()
     i_m = G.iou(ctx['out']['box'][rows, k], gb)
@@ -193,12 +205,12 @@ def _c1(ctx, split):
              luong_tru_hop_tb=MT.summarize(i_m - i_0, k, pat, **kw), luong_tru_tu_dong=MT.summarize(i_m - i_a, k, pat, **kw),
              ti_le_05=dict(luong=MT.share_at(i_m, 0.5), hop_tb=MT.share_at(i_0, 0.5), tu_dong=MT.share_at(i_a, 0.5)),
              n_anh=int(g.dicom_id.nunique()))
-    return dict(dicom_id=g.dicom_id.to_numpy(), k=k, iou_luong=i_m, iou_hop_tb=i_0, iou_tu_dong=i_a), s
+    return dict(dicom_id=g.dicom_id.to_numpy(), split=g.split.to_numpy(), k=k, iou_luong=i_m, iou_hop_tb=i_0, iou_tu_dong=i_a), s
 
 
-def _c2(ctx, split):
-    '''C2 trên một split: đơn vị = (ảnh, dấu hiệu); mặt nạ = hợp các hộp tổn thương của dấu hiệu đó trong ảnh. -> (bảng từng đơn vị, tổng hợp).'''
-    m = ctx['ms'][ctx['ms'].split == split]
+def _c2(ctx, splits):
+    '''C2 trên các split `splits`: đơn vị = (ảnh, dấu hiệu); mặt nạ = hợp các hộp tổn thương của dấu hiệu đó trong ảnh. -> (bảng từng đơn vị, tổng hợp).'''
+    m = ctx['ms'][ctx['ms'].split.isin(tuple(splits))]
     o, sig = ctx['out'], lambda v: 1.0 / (1.0 + np.exp(-v))
     rec = []
     for (d, j), gr in m.groupby(['dicom_id', 'j'], sort=True):
@@ -206,7 +218,7 @@ def _c2(ctx, split):
         mask = MP.box_mask(gr[['b1', 'b2', 'b3', 'b4']].to_numpy(), C.GRID)
         am, share = MP.attention_map(o['attn'][r, f], C.GRID)
         ms_ = dict(attention=am, nhan_vung=MP.paint(o['box'][r], sig(o['z'][r, :, f]), C.GRID), bat_thuong=MP.paint(o['box'][r], sig(o['bt'][r]), C.GRID))
-        rec.append(dict(dicom_id=d, f=f, benh_nhan=gr.subject_id.iloc[0], dien_tich=MP.area(mask), attention_o_token_vung=share,
+        rec.append(dict(dicom_id=d, split=gr.split.iloc[0], f=f, benh_nhan=gr.subject_id.iloc[0], dien_tich=MP.area(mask), attention_o_token_vung=share,
                         **{f'trung_{s}': MP.hit(ms_[s], mask) for s in SOURCES}, **{f'kl_{s}': MP.energy(ms_[s], mask) for s in SOURCES}))
     u = {k: np.array([x[k] for x in rec]) for k in rec[0]}
     kw = dict(n_boot=C.N_BOOT, seed=C.BOOT_SEED, key_names=list(C.FINDINGS))
@@ -225,16 +237,16 @@ def _jsonable(o):
         return {str(k): _jsonable(v) for k, v in o.items()}
     if isinstance(o, (list, tuple)):
         return [_jsonable(v) for v in o]
-    if isinstance(o, (np.floating, np.integer)):
+    if isinstance(o, (np.floating, np.integer, np.bool_)):
         return o.item()
     return o
 
 
-def _report(ctx, split):
+def _report(ctx, splits, ten):
     log = ctx['log']
-    u1, s1 = _c1(ctx, split)
-    u2, s2 = _c2(ctx, split)
-    log(f"\n==== C1 giai phau | {split} | {s1['n_anh']} anh, {s1['luong']['n']} hop gold, {len(s1['luong']['per_key'])} vung | IoU so voi hop gold ====")
+    u1, s1 = _c1(ctx, splits)
+    u2, s2 = _c2(ctx, splits)
+    log(f"\n==== C1 giai phau | {ten} | {s1['n_anh']} anh, {s1['luong']['n']} hop gold, {len(s1['luong']['per_key'])} vung | IoU so voi hop gold ====")
     log(f"  luong vung (ArrE)                : {MT.fmt(s1['luong'])} | IoU >= 0,5: {s1['ti_le_05']['luong']:.3f}")
     log(f"  san: hop trung binh co dinh      : {MT.fmt(s1['hop_tb'])} | IoU >= 0,5: {s1['ti_le_05']['hop_tb']:.3f}")
     log(f"  tran tham chieu: hop tu dong     : {MT.fmt(s1['tu_dong'])} | IoU >= 0,5: {s1['ti_le_05']['tu_dong']:.3f}  (gold lam bang cach SUA cac hop nay)")
@@ -245,12 +257,11 @@ def _report(ctx, split):
         if name in s1['luong']['per_key']:
             a, n = s1['luong']['per_key'][name]
             log(f"    {name:<28} {a:.3f} / {s1['hop_tb']['per_key'][name][0]:.3f} / {n}")
-    log(f"\n==== C2 ton thuong | {split} | {s2['n_don_vi']} cap (anh, dau hieu) | muc may rui = ti le dien tich hop ====")
+    log(f"\n==== C2 ton thuong | {ten} | {s2['n_don_vi']} cap (anh, dau hieu) | muc may rui = ti le dien tich hop ====")
     log(f"  dien tich hop (may rui)          : {MT.fmt(s2['dien_tich'])}")
     log(f"  phan attention o 36 token vung   : {MT.fmt(s2['attention_o_token_vung'])}")
-    ten = dict(attention='attention cua dau doc', nhan_vung='diem nhan theo vung', bat_thuong='co bat thuong tung vung')
     for src in SOURCES:
-        log(f"  [{ten[src]}]")
+        log(f"  [{SOURCE_NAMES[src]}]")
         log(f"    trung diem                     : {MT.fmt(s2['trung_' + src])}")
         log(f"    trung diem - may rui (ghep cap): {MT.fmt(s2['trung_' + src + '_tru_may_rui'])}")
         log(f"    khoi luong trong hop           : {MT.fmt(s2['kl_' + src])}")
@@ -273,18 +284,38 @@ def _write(ctx, name, summary, units):
 def calibrate(ctx):
     '''Phần TRAIN: ảnh mô hình ĐÃ THẤY lúc học (có hộp silver gần trùng gold) -> chỉ để định cỡ sàn / trần / độ rộng khoảng tin cậy và bắt lỗi đường chấm.'''
     log = ctx['log']
+    if ctx['mode'] != 'dinh_co':
+        log('dinh co: BO QUA — goi nay o che do val + test; so dinh co da co o luot goi 0.1.1 (config.TRAIN_REFERENCE; Event 2026-11-18).')
+        return None
     log('PHAN TRAIN — anh mo hinh da thay luc hoc: so duoi day de DINH CO va khoa nguong, KHONG phai ket qua cua phep thu.')
-    s, u = _report(ctx, 'train')
+    s, u = _report(ctx, ('train',), 'train')
     hon = s['c1']['luong']['pooled'] - s['c1']['hop_tb']['pooled']
     assert hon >= C.MIN_GAIN_OVER_MEAN_BOX, (f'cong duong cham: IoU luong - san = {hon:.3f} < {C.MIN_GAIN_OVER_MEAN_BOX} tren gold train -> sai hinh hoc / thu tu '
                                              f'vung / trong so -> DUNG')
     log(f"\ncong duong cham: IoU luong - san = {hon:.3f} >= {C.MIN_GAIN_OVER_MEAN_BOX} -> DAT | nhat ky huan luyen (giu rieng, silver): "
         f"{ctx['mo_hinh']['nhat_ky'].get('luong_iou')}")
-    summary = dict(che_do='dinh_co', split='train', goi=__version__, run=RUN_TAG, mo_hinh=ctx['mo_hinh'], so_dem=ctx['so_dem'], cong_224=ctx['cong_224'],
+    summary = dict(che_do='dinh_co', split='train', goi=__version__, run=run_tag('dinh_co'), mo_hinh=ctx['mo_hinh'], so_dem=ctx['so_dem'], cong_224=ctx['cong_224'],
                    cong_thu_tu=ctx.get('cong_thu_tu'), n_boot=C.N_BOOT, hat_boot=C.BOOT_SEED, **s)
     _write(ctx, 'dinh_co_train', summary, u)
     ctx['dinh_co'] = summary
     return dict(iou_luong=s['c1']['luong']['pooled'], iou_san=s['c1']['hop_tb']['pooled'], iou_tran=s['c1']['tu_dong']['pooled'])
+
+
+def rule(s_all, s_val, s_test, thr):
+    '''Luật đã khoá cho MỘT hiệu ghép cặp: cận dưới CI95 (gộp, val + test) >= ngưỡng VÀ ước lượng điểm > 0 ở riêng val lẫn riêng test.'''
+    ci = s_all.get('ci_pooled')
+    lo = float(ci[0]) if ci else float('nan')
+    cung = bool(s_val['pooled'] > 0 and s_test['pooled'] > 0)
+    return dict(dat=bool(np.isfinite(lo) and lo >= float(thr) and cung), can_duoi=lo, can_tren=(float(ci[1]) if ci else float('nan')), nguong=float(thr),
+                uoc_luong=float(s_all['pooled']), val=float(s_val['pooled']), test=float(s_test['pooled']), cung_dau=cung)
+
+
+def verdicts(s_all, s_val, s_test):
+    '''-> {'c1': kết luận, 'c2': {bản đồ: kết luận}} theo config.THRESHOLDS.'''
+    t = C.THRESHOLDS
+    return dict(c1=rule(s_all['c1']['luong_tru_hop_tb'], s_val['c1']['luong_tru_hop_tb'], s_test['c1']['luong_tru_hop_tb'], t['c1_luong_tru_san']),
+                c2={src: rule(s_all['c2'][f'trung_{src}_tru_may_rui'], s_val['c2'][f'trung_{src}_tru_may_rui'], s_test['c2'][f'trung_{src}_tru_may_rui'],
+                              t['c2_trung_tru_may_rui'][src]) for src in SOURCES})
 
 
 def evaluate(ctx):
@@ -293,14 +324,34 @@ def evaluate(ctx):
     if C.THRESHOLDS is None:
         log('val / test: CHUA DOC — nguong cua luat doc chua khoa (PLAN_90 §11.5). Gui output C6 cho Claude; nguong khoa o ban goi sau, roi moi mo val / test.')
         return None
-    assert ctx['mode'] == 'val_test', ctx['mode']
-    res = {}
-    for split in ('val', 'test'):
-        s, u = _report(ctx, split)
-        _write(ctx, f'dinh_vi_{split}', dict(che_do='val_test', split=split, goi=__version__, run=RUN_TAG, nguong=C.THRESHOLDS, mo_hinh=ctx['mo_hinh'],
-                                             so_dem=ctx['so_dem'], n_boot=C.N_BOOT, hat_boot=C.BOOT_SEED, **s), u)
-        res[split] = s
-    return res
+    assert ctx['mode'] == 'val_test' and tuple(ctx['splits']) == tuple(C.EVAL_SPLITS), (ctx['mode'], ctx['splits'])
+    log('VAL + TEST — benh nhan mo hinh CHUA thay; doc MOT lan; khong chon mo hinh / sieu tham so tren cac so nay.')
+    res, units = {}, {}
+    for splits, ten in ((('val',), 'val'), (('test',), 'test'), (tuple(C.EVAL_SPLITS), 'val + test')):
+        res[ten], units[ten] = _report(ctx, splits, ten)
+    kl = verdicts(res['val + test'], res['val'], res['test'])
+    ref, al = C.TRAIN_REFERENCE, res['val + test']
+    f3 = lambda x: f'{x:+.3f}'
+    dong = lambda r: (f"{f3(r['uoc_luong'])} [{f3(r['can_duoi'])}; {f3(r['can_tren'])}] | can duoi >= {r['nguong']:.2f}? {'co' if r['can_duoi'] >= r['nguong'] else 'KHONG'} | "
+                      f"val {f3(r['val'])}, test {f3(r['test'])} cung > 0? {'co' if r['cung_dau'] else 'KHONG'} -> {'DAT' if r['dat'] else 'KHONG DAT'}")
+    log('\n==== LUAT DOC (khoa 18/11, truoc khi mo val / test) | val + test GOP; hieu ghep cap; CI95 bootstrap theo benh nhan ====')
+    log(f"  C1 \"luong vung bam giai phau o benh nhan chua thay\" — IoU luong − IoU hop trung binh co dinh: {dong(kl['c1'])}")
+    for src in SOURCES:
+        log(f"  C2 \"{SOURCE_NAMES[src]} chi vao hop ton thuong hon may rui\" — trung diem − ti le dien tich hop: {dong(kl['c2'][src])}")
+    log('\n==== DA THAY (phan train, luot dinh co) so voi CHUA THAY (val + test) — chi mo ta, khong co luat ====')
+    log(f"  C1 IoU luong: train {ref['c1']['luong']:.3f} -> val + test {al['c1']['luong']['pooled']:.3f} ({al['c1']['luong']['pooled'] - ref['c1']['luong']:+.3f}) | "
+        f"luong − san: train {ref['c1']['luong_tru_hop_tb']:+.3f} -> {al['c1']['luong_tru_hop_tb']['pooled']:+.3f} | IoU >= 0,5: train {ref['c1']['ti_le_05']:.3f} -> "
+        f"{al['c1']['ti_le_05']['luong']:.3f}")
+    for src in SOURCES:
+        v = al['c2'][f'trung_{src}']['pooled']
+        log(f"  C2 trung diem [{SOURCE_NAMES[src]}]: train {ref['c2']['trung'][src]:.3f} -> val + test {v:.3f} ({v - ref['c2']['trung'][src]:+.3f})")
+    base = dict(che_do='val_test', goi=__version__, run=run_tag('val_test'), nguong=C.THRESHOLDS, mo_hinh=ctx['mo_hinh'], so_dem=ctx['so_dem'], cong_224=ctx['cong_224'],
+                cong_thu_tu=ctx.get('cong_thu_tu'), tai_anh=ctx.get('tai_anh'), n_boot=C.N_BOOT, hat_boot=C.BOOT_SEED, tham_chieu_train=C.TRAIN_REFERENCE)
+    _write(ctx, 'dinh_vi_val', dict(base, split='val', **res['val']), units['val'])
+    _write(ctx, 'dinh_vi_test', dict(base, split='test', **res['test']), units['test'])
+    _write(ctx, 'dinh_vi_val_test', dict(base, split='val + test', ket_luan=kl, **res['val + test']), units['val + test'])
+    ctx['ket_qua'] = dict(res, ket_luan=kl)
+    return kl
 
 
 def sync(ctx):

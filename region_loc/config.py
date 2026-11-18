@@ -58,6 +58,17 @@ MIN_GAIN_OVER_MEAN_BOX = 0.20
 # ---- bootstrap ----
 N_BOOT, BOOT_SEED = 2000, 90117
 
-# ---- luật đọc val / test (PLAN_90 §11.5): None = CHƯA khoá -> notebook.evaluate dừng. Khoá ở bản gói sau, khi đã có số định cỡ trên phần train. ----
-THRESHOLDS = None
+# ---- luật đọc val / test (PLAN_90 §11.5) — KHOÁ 18/11, Tuấn duyệt "Proposed thresholds" sau lượt định cỡ (Event 2026-11-18 "Kết quả định cỡ `90c` …").
+# None = chưa khoá -> chế độ định cỡ (chỉ phần train; gói 0.1.x). Đã khoá -> chế độ val + test, đọc MỘT lần.
+# Mọi ngưỡng áp cho CẬN DƯỚI CI95 (bootstrap theo bệnh nhân) của hiệu ghép cặp, trên val + test GỘP; thêm điều kiện ước lượng điểm > 0 ở riêng val VÀ riêng test.
+#   c1_luong_tru_san    : IoU luồng vùng − IoU hộp trung bình cố định; 0,30 = 70 % của mức đo trên phần train (+0,423)
+#   c2_trung_tru_may_rui: "trúng điểm" − tỉ lệ diện tích hộp; = một nửa mức đo trên phần train (attention +0,454; nhãn-vùng +0,397; cờ bất thường +0,278)
+THRESHOLDS = {'c1_luong_tru_san': 0.30, 'c2_trung_tru_may_rui': {'attention': 0.23, 'nhan_vung': 0.20, 'bat_thuong': 0.14}}
+# Số của lượt định cỡ (phần TRAIN, ảnh mô hình đã thấy; gói 0.1.1, G4, 18/11) — in cạnh val / test để thấy khoảng cách "đã thấy − chưa thấy" (chỉ mô tả).
+TRAIN_REFERENCE = {'c1': {'luong': 0.817, 'hop_tb': 0.394, 'tu_dong': 0.975, 'luong_tru_hop_tb': 0.423, 'ti_le_05': 0.942},
+                   'c2': {'dien_tich': 0.098, 'trung': {'attention': 0.552, 'nhan_vung': 0.495, 'bat_thuong': 0.376},
+                          'trung_tru_may_rui': {'attention': 0.454, 'nhan_vung': 0.397, 'bat_thuong': 0.278}}}
+RUN_TAGS = {'dinh_co': 'r90c_dinh_vi_arre_s42', 'val_test': 'r90c_dinh_vi_arre_s42_vt'}
+EVAL_SPLITS = ('val', 'test')
+N_THREADS = 6                          # luồng tải kho 518 qua Drive API (mẫu 78r_cat_vung: 6 luồng)
 BATCH = 32

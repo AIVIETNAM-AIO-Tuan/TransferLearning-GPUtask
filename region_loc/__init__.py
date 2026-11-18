@@ -16,4 +16,4 @@ Hai phép thử trên mô hình ĐÔNG CỨNG, không học:
 
 Luật dữ liệu (PLAN_90 §11.2): chỉ đọc toạ độ hộp + tên vùng / tên dấu hiệu; val / test chỉ mở khi `config.THRESHOLDS` đã khoá (bản gói sau).
 Gói phụ thuộc gói `vindr_bench` (module 89) ở commit ghim — không chép lại mã mô hình."""
-__version__ = '0.1.1'
+__version__ = '0.2.0'
