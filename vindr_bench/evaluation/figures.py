@@ -16,6 +16,8 @@ Chọn dạng theo việc của dữ liệu; màu ĐÃ CHẠY bộ kiểm bảng
   - lr_curves  số đo val theo lr: đường, 4 đầu = 4 màu theo thứ tự cố định (cặp kề nhau: đạt)
   - delta_modes (0.9.2) hiệu của cùng một hàng theo tối đa 3 cách tính: chấm, mỗi đầu đọc một ô, đường 0 + ngưỡng ±; 3 ô màu đầu (đạt mọi cặp) + hình chấm
   - lead_shift  (0.9.2) trước -> sau của từng hàng (dumbbell): MỘT màu, chấm rỗng = trước, chấm đặc = sau, vạch nối (dataviz: "before -> after per item")
+  - family_ci   (0.12.0) một họ phép so có khoảng (họ 16 phép (3) − X của Việc B): MỘT màu, vạch = khoảng, chấm đặc = đạt dạng luật, chấm rỗng = không
+               phân biệt; đường 0 + ngưỡng ± (kết luận mã hoá bằng hình chấm, không bằng màu)
   Điều kiện thứ tư (0.9.0, kho cắt giữa): KHÔNG thêm màu thứ tư vào `dots` — chấm của các điều kiện chồng lên nhau nên mọi cặp màu phải phân biệt, và ô màu thứ
   tư (vàng cạnh cam) trượt sàn mọi cặp của bảng màu (dataviz palette.md) -> dots giữ 3 điều kiện; kho cắt giữa ở `heat` (mỗi điều kiện một ô, thang một sắc) và
   ở `cond_diff`.
@@ -514,6 +516,55 @@ def lead_shift(before, after, rows, heads, row_title, head_title, labels, title,
     hd = [Line2D([], [], linestyle='', marker='o', markerfacecolor=SURFACE, markeredgecolor=ONE_HUE, markersize=5.5, markeredgewidth=1.3),
           Line2D([], [], linestyle='', marker='o', color=ONE_HUE, markersize=5.8, markeredgecolor=SURFACE, markeredgewidth=0.6)]
     _layout(fig, title, note, legend=(hd, list(labels)))
+    return fig
+
+
+def family_ci(items, rows, heads, row_title, head_title, title, xlabel, note=None, margin=None, labels=('đạt dạng luật', 'không phân biệt')):
+    '''Một HỌ phép so có khoảng (0.12.0, họ 16 phép (3) − X của PLAN_90 §10.2): items[(hàng, đầu)] = dict(d, lo, hi, dat) — d = hiệu điểm, [lo, hi] = khoảng
+       (đồng thời max-T khi họ đủ, bên gọi ghi rõ trong tiêu đề / ghi chú), dat = True khi phép so đạt dạng luật ("hơn" hoặc "kém"). Mỗi đầu đọc một ô; trục
+       y = hàng (cùng thứ tự mọi ô); trục x chung; đường 0 liền, margin: hai đường đứt ở ±margin. MỘT màu: vạch ngang = khoảng, chấm ĐẶC = đạt dạng luật,
+       chấm RỖNG = không phân biệt (không dùng màu để mã hoá kết luận — số + nhãn kết luận ở bảng cùng ô notebook). Line2D có gid 'khoang' / 'dat' / 'chua'.
+       -> Figure | None (không có phép so nào).'''
+    from matplotlib.lines import Line2D
+
+    def get(r, h):
+        it = items.get((r, h))
+        return it if it is not None and it['d'] == it['d'] else None
+    if not any(get(r, h) for r in rows for h in heads):
+        return None
+    plt = _plt()
+    n = len(rows)
+    fig, axes = plt.subplots(1, len(heads), figsize=(2.55 * len(heads) + 1.4, 0.42 * n + 1.9), sharey=True, sharex=True, squeeze=False)
+    axes = axes[0]
+    for ax, h in zip(axes, heads):
+        for i in range(n - 1):
+            ax.axhline(i + 0.5, color=GRID, linewidth=0.5, zorder=0)
+        ax.axvline(0.0, color=MUTED, linewidth=0.9, zorder=1)
+        if margin:
+            for s in (-margin, margin):
+                ax.axvline(s, color=AXIS, linewidth=0.8, linestyle=(0, (3, 3)), zorder=1)
+        got = [(i, get(r, h)) for i, r in enumerate(rows)]
+        for i, it in got:
+            if it is not None and it.get('lo') is not None and it['lo'] == it['lo']:
+                ax.plot([it['lo'], it['hi']], [i, i], '-', color=ONE_HUE, linewidth=2.0, solid_capstyle='round', zorder=2, gid='khoang')
+        yes = [(it['d'], i) for i, it in got if it is not None and it.get('dat')]
+        no = [(it['d'], i) for i, it in got if it is not None and not it.get('dat')]
+        if yes:
+            ax.plot([v for v, _ in yes], [i for _, i in yes], linestyle='', marker='o', color=ONE_HUE, markersize=6.0, markeredgecolor=SURFACE,
+                    markeredgewidth=0.9, zorder=4, gid='dat')
+        if no:
+            ax.plot([v for v, _ in no], [i for _, i in no], linestyle='', marker='o', markerfacecolor=SURFACE, markeredgecolor=ONE_HUE, markersize=5.4,
+                    markeredgewidth=1.4, zorder=4, gid='chua')
+        ax.set_title(head_title[h], loc='left')
+        _clean(ax, 'x')
+        ax.set_yticks(range(n))
+        ax.set_yticklabels([row_title[r] for r in rows])
+        ax.set_xlabel(xlabel)
+    axes[0].set_ylim(n - 0.5, -0.5)
+    hd = [Line2D([], [], linestyle='', marker='o', color=ONE_HUE, markersize=6.0, markeredgecolor=SURFACE, markeredgewidth=0.9),
+          Line2D([], [], linestyle='', marker='o', markerfacecolor=SURFACE, markeredgecolor=ONE_HUE, markersize=5.4, markeredgewidth=1.4),
+          Line2D([], [], color=ONE_HUE, linewidth=2.0)]
+    _layout(fig, title, note, legend=(hd, [labels[0], labels[1], 'khoảng']))
     return fig
 
 

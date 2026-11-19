@@ -4,6 +4,8 @@
     Ver1   stage4_nb89/r89v1_<encoder>[_k64]   mỗi loại đầu: du_doan_<nhãn>_<đầu>_<t>.npz (preds, target) + luot_<nhãn>_<đầu>_<t>.json
            CheXFound Linear-4 + GLoRI: dùng lại `86f` (stage4_nb86f/r86f_chexfound_moi_truong_ho, đầu lin / glori) — cổng PLAN_89 §4.3
     Ver2   stage4_nb89/r89v2_<encoder>_<kho>   luot_<nhãn>_<t>.json + du_doan_<nhãn>_<t>.npz (test_<nhánh>_s<k>, val_…, y_test)
+    Việc B stage4_nb89/r89v2_vt_<hàng>_kcb     (0.12.0, PLAN_90 §10.2) 5 hàng ablation: lượt Ver2 thường, CHỈ kho đệm vuông không cân bằng, không có Ver1 —
+           gom qua tham số `ablation` của collect(); ô của chúng mang tên hàng vt_* nên KHÔNG lọt vào bảng / họ phép so của 9 encoder (lọc theo ALL_ROWS)
 
 Lượt chưa có trên Drive -> ghi vào danh sách thiếu (không lỗi): notebook tổng hợp chạy được khi mới có một phần kết quả. Mỗi thư mục lấy bộ tệp có dấu
 thời gian MỚI NHẤT mà đủ cặp JSON + dự đoán. Không in mã ảnh; chỉ số tổng hợp."""
@@ -13,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..encoders.spec import SPECS
+from ..encoders.spec import ABLATION_STORE, SPECS
 from ..protocols import geometry as GEO
 
 FOLDER = 'stage4_nb89'
@@ -154,8 +156,9 @@ def load_v2(drive, encoder, store):
     return sets, (list(js['nhan']), list(js['lop_chinh'])), {k: sorted(v) for k, v in curves.items()}, js['chon']
 
 
-def collect(drive, encoders, stores=V2_STORES, log=print):
-    '''Gom mọi lượt đang có. -> dict(sets, thieu [(mô tả)], nhan, lop_chinh, duong_lr {(encoder, kho): …}, chon_v2, kiem_86f, co {mô tả lượt: số bộ}).'''
+def collect(drive, encoders, stores=V2_STORES, log=print, ablation=()):
+    '''Gom mọi lượt đang có. -> dict(sets, thieu [(mô tả)], nhan, lop_chinh, duong_lr {(encoder, kho): …}, chon_v2, kiem_86f, co {mô tả lượt: số bộ}).
+       ablation (0.12.0): tên các hàng Việc B (spec.ABLATION_ROWS) — mỗi hàng MỘT lượt Ver2 ở kho ABLATION_STORE, không Ver1; thiếu -> liệt kê, không lỗi.'''
     sets, missing, names, have, curves, chon = [], [], None, {}, {}, {}
     for e in encoders:
         s, nm = load_v1(drive, e)
@@ -193,6 +196,16 @@ def collect(drive, encoders, stores=V2_STORES, log=print):
             sets += s
             if cv:
                 curves[(e, st)], chon[(e, st)] = cv, ch
+    for e in ablation:                                                   # 0.12.0: 5 hàng Việc B (PLAN_90 §10.2) — chỉ Ver2 kho đệm vuông không cân bằng
+        assert e not in encoders, f'{e}: hang ablation trung ten hang cua bang chinh -> DUNG'
+        s, nm, cv, ch = load_v2(drive, e, ABLATION_STORE)
+        names = names or nm
+        have[f'Viec B {e} kho {ABLATION_STORE} ({v2_tag(e, ABLATION_STORE)})'] = len(s)
+        if not s:
+            missing.append(f'Viec B {e} kho {ABLATION_STORE}: chua co ket qua trong {FOLDER}/{v2_tag(e, ABLATION_STORE)}')
+        sets += s
+        if cv:
+            curves[(e, ABLATION_STORE)], chon[(e, ABLATION_STORE)] = cv, ch
     assert sets, 'khong co luot nao tren Drive -> chay notebook 89v1_* / 89v2_* truoc. DUNG'
     assert names, 'khong doc duoc ten nhan / lop so chinh tu ket qua -> DUNG'
     for x in sets:
