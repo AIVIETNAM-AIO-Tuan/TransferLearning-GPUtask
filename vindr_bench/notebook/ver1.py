@@ -16,7 +16,7 @@ import traceback
 
 from .. import __version__
 from ..data import vindr as V
-from ..encoders import BUILT, SPECS
+from ..encoders import ABLATION_ROWS, BUILT, SPECS
 from ..evaluation import panels as P
 from ..protocols.chexfound_env import dataset as D
 from ..protocols.chexfound_env import environment as E
@@ -28,7 +28,8 @@ FOLDER = 'stage4_nb89'
 DRIVE_NAMES = ('kiem_ke', 'tai', 'xung_dot', 'ghi', 'ghi_json', 'dong_bo', 'ten_tren_drive', 'tim_moi_noi', 'khoi_phuc_cho', 'luu_resume', 'cho_nho',
                'GHI_LOC', 'TEN_RESUME', 'RUN_TAG', '_duong', '_liet_ke')   # _duong / _liet_ke: tệp trọng số ngoài cxrlt_2024 (MIMIC_CXR/MRM, /CheXZero)
 THEIR_MODEL = ('chexfound',)          # Ver1: mô hình + bộ nạp của chính mã họ (không lớp bọc), như 86f
-NOT_VER1 = ()                         # 0.8.0 (Tuấn 15/11 "build the code for running B in Ver 1 as plan"): B có Ver1 (khúc ô 64: protocols/chexfound_env.BUILD_KW)
+NOT_VER1 = ABLATION_ROWS              # 0.8.0 (Tuấn 15/11 "build the code for running B in Ver 1 as plan"): B có Ver1 (khúc ô 64: protocols/chexfound_env.BUILD_KW);
+                                      # 0.11.0: 5 hàng Việc B CHỈ Ver2 kho kcb (PLAN_90 §10.2)
 HEADS_V1 = {'chexfound': ('lin1', 'mldec')}   # CheXFound: Linear-4 + GLoRI dùng lại 86f sau cổng PLAN_89 §4.3 (bảng gộp, bước 5)
 WEIGHTS_PLACEHOLDER = 'khong_dung__lop_boc_thay_mo_hinh'      # --pretrained-weights: lớp bọc thay setup_and_build_model -> mã họ không đọc
 PAPER_HEAD = {'lin4': 'Linear', 'glori': 'GLoRI'}               # cột Bảng IV CheXFound tương ứng (linear probing của họ = 4 tầng cuối)

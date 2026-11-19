@@ -34,8 +34,8 @@ class EncoderSpec:
                                            # None = tải từ Hugging Face. Tên Tuấn báo trong chat = giả định tới lượt chạy đầu (C4 liệt kê qua API, dừng nếu thiếu).
     drive_file: Optional[str] = None       # tên tệp trọng số trong thư mục đó
     file_md5: Optional[str] = None         # md5 + kích thước tệp Drive đã ghim (bản tải từ nguồn công khai của tác giả, kiểm trên máy)
-    file_size: Optional[int] = None
-    extra_files: Tuple[Tuple[str, str, int], ...] = ()   # tệp phụ CÙNG thư mục Drive (tên, md5, kích thước) — vd cấu hình của B (backbone_ft.pt)
+    file_size: Optional[int] = None        # 0.11.0: None = ghim theo md5 (kích thước chưa biết lúc dựng — 5 hàng Việc B; kích thước lấy từ Drive, ghi lại)
+    extra_files: Tuple[Tuple[str, str, Optional[int]], ...] = ()   # tệp phụ CÙNG thư mục Drive (tên, md5, kích thước | None) — vd cấu hình của B (backbone_ft.pt)
     run_suffix: str = ''                   # hậu tố RUN_TAG khi lớp bọc đổi SAU khi hàng đã chạy (lượt mới không trộn thư mục / tệp resume của lượt cũ):
                                            # '_imnet' = PubMedCLIP chuẩn hoá ImageNet (16/11). Dùng ở notebook.ver1 / ver2.run_tag và evaluation.collect.
 
@@ -43,13 +43,15 @@ class EncoderSpec:
         assert self.pool in POOLS and self.status in ('da_dung', 'chua_dung'), (self.name, self.pool, self.status)
         assert self.run_suffix == '' or re.fullmatch(r'_[a-z0-9]+', self.run_suffix), (self.name, self.run_suffix)
         assert self.image_size % self.patch_size == 0, (self.name, self.image_size, self.patch_size)
-        assert (self.drive_dir is None) == (self.drive_file is None) == (self.file_md5 is None) == (self.file_size is None), self.name
-        assert not self.extra_files or (self.drive_dir and all(len(e) == 3 and e[1] and int(e[2]) > 0 for e in self.extra_files)), self.name
+        assert (self.drive_dir is None) == (self.drive_file is None) == (self.file_md5 is None) and (self.drive_file or self.file_size is None), self.name
+        assert self.file_size is None or int(self.file_size) > 0, self.name
+        assert not self.extra_files or (self.drive_dir and all(len(e) == 3 and e[1] and (e[2] is None or int(e[2]) > 0) for e in self.extra_files)), self.name
 
     @property
     def drive_files(self):
-        '''-> [(tên, md5, kích thước)] mọi tệp Drive của hàng: tệp trọng số chính trước, rồi tệp phụ.'''
-        return ([(self.drive_file, self.file_md5, int(self.file_size))] if self.drive_file else []) + [tuple(e) for e in self.extra_files]
+        '''-> [(tên, md5, kích thước | None)] mọi tệp Drive của hàng: tệp trọng số chính trước, rồi tệp phụ. None = chỉ ghim md5 (0.11.0).'''
+        return ([(self.drive_file, self.file_md5, None if self.file_size is None else int(self.file_size))] if self.drive_file else []) + [
+            tuple(e) for e in self.extra_files]
 
     @property
     def n_patches(self):
@@ -134,7 +136,51 @@ SPECS = {s.name: s for s in (
                 'với B là so HAI HỆ THỐNG (khác khởi tạo, 224 so với 518, mục tiêu) — họ phép so riêng (PLAN_90 §2)',
                 drive_dir='cxrlt_2024/asg', drive_file='asg_vit.ckpt', file_md5='d50b724f7e3284d010ea4f4985e765e8', file_size=734485971),
 )}
+
+# 0.11.0 (PLAN_90 Việc B §10.1–§10.2; Tuấn duyệt 17/11, dựng VinDr 19/11): năm hàng ablation "vị trí mô-đun vùng" — lớp bọc encoders/vt.py. md5 = bản trên
+# Drive mà C0 của 5 notebook 78r_dac_trung_vt_*_s42 đã tải + qua cổng (18/11); kích thước chưa biết -> ghim theo md5. KHÔNG vào bảng 9 encoder / họ 32 phép:
+# chỉ kho kcb, bảng + họ 16 phép (3) − X riêng ở 89t.
+_VT_DIR = 'cxrlt_2024/stage4_nb78x/'
+_VT_SRC = ('khối 78 / 79 (encoders/b_src.py, vt_src.py) + cổng C2b của 78r VT / 78z (đã ĐẠT trên chính các tệp này 18/11); lớp bọc encoders/vt.py kiểm checkpoint '
+           'giả + tệp thật (tests/test_vt.py)')
+_VT_THAT = '; TỆP THẬT kiểm trên máy 19/11 (md5 = ghim, nạp từng tensor, cổng của hàng, bf16 vs fp32)'
+_VT_C4 = '; tệp thật: cổng C4 trong lượt (cùng bộ dựng 78x VT với hàng (1b), tệp thật của (1b) đã kiểm 19/11)'
+_VT_DATA = 'MIMIC-CXR (CXR-LT 2024, seed 42, 6 epoch, trọng số EMA ep4) + thừa hưởng RAD-DINO'
+_VT_ARCH = 'ViT-B/14 (RAD-DINO tinh chỉnh)'
+for _s in (
+    EncoderSpec('vt_b4v2', '(3) trong encoder + ghi ngược (B.4 v2)', f'{_VT_ARCH} + luồng vùng trong encoder, ghi ngược (= B không đường ô cắt)', 518, 14, 768,
+                _G3(0.5307), _G3(0.2583), 'cls', 'checkpoint của ta: lượt 78x r78x_J_v3b_dp_ema_v2_s42 — rs_J_bert_dong_ep4.pt + backbone_ft.pt', 'của ta', _VT_DATA,
+                'da_dung', _VT_SRC + _VT_THAT, 'hàng THAM CHIẾU của họ 16 phép (PLAN_90 §10.2); CLS / patch lấy SAU luồng vùng + ghi ngược (như B)',
+                drive_dir=_VT_DIR + 'r78x_J_v3b_dp_ema_v2_s42', drive_file='rs_J_bert_dong_ep4.pt', file_md5='ce771e5b736b97fd08bb62192fd298e0',
+                extra_files=(('backbone_ft.pt', 'e1b103a2ef7acdb068e849cfebac0174', None),)),
+    EncoderSpec('vt_mot_chieu', '(2) trong encoder, chỉ đọc', f'{_VT_ARCH}; lúc học luồng vùng trong encoder, KHÔNG ghi ngược', 518, 14, 768,
+                _G3(0.5307), _G3(0.2583), 'cls', 'checkpoint của ta: lượt 78x r78x_J_v3b_dp_ema_vt_mot_chieu_s42 — rs_J_bert_dong_ep4.pt + backbone_ft.pt', 'của ta',
+                _VT_DATA, 'da_dung', _VT_SRC + _VT_C4, 'token ảnh = forward RAD-DINO trọng số tinh chỉnh (luồng chỉ đọc); cổng lúc dựng: forward đầy đủ = token ảnh từng bit',
+                drive_dir=_VT_DIR + 'r78x_J_v3b_dp_ema_vt_mot_chieu_s42', drive_file='rs_J_bert_dong_ep4.pt', file_md5='6f66e30a052e332eec9896cfa486cf95',
+                extra_files=(('backbone_ft.pt', '6c85dee757585755180533b4ca49a528', None),)),
+    EncoderSpec('vt_sau4', '(1a) sau encoder, 4 lớp', f'{_VT_ARCH}; lúc học 4 lớp JCA sau block cuối, chỉ đọc', 518, 14, 768,
+                _G3(0.5307), _G3(0.2583), 'cls', 'checkpoint của ta: lượt 78x r78x_J_v3b_dp_ema_vt_sau4_s42 — rs_J_bert_dong_ep4.pt + backbone_ft.pt', 'của ta',
+                _VT_DATA, 'da_dung', _VT_SRC + _VT_C4, 'token ảnh = forward RAD-DINO trọng số tinh chỉnh (luồng sau encoder); cổng lúc dựng: forward đầy đủ = token ảnh từng bit',
+                drive_dir=_VT_DIR + 'r78x_J_v3b_dp_ema_vt_sau4_s42', drive_file='rs_J_bert_dong_ep4.pt', file_md5='2635d1f0b9c23454216660f9e1787357',
+                extra_files=(('backbone_ft.pt', 'e59f3f8fbb54372d3033c2f11260010c', None),)),
+    EncoderSpec('vt_sau1', '(1b) sau encoder, 1 lớp', f'{_VT_ARCH}; lúc học 1 lớp JCA sau block cuối, chỉ đọc (kiểu ADPD)', 518, 14, 768,
+                _G3(0.5307), _G3(0.2583), 'cls', 'checkpoint của ta: lượt 78x r78x_J_v3b_dp_ema_vt_sau1_s42 — rs_J_bert_dong_ep4.pt + backbone_ft.pt', 'của ta',
+                _VT_DATA, 'da_dung', _VT_SRC + _VT_THAT, 'token ảnh = forward RAD-DINO trọng số tinh chỉnh (luồng sau encoder); cổng lúc dựng: forward đầy đủ = token ảnh từng bit',
+                drive_dir=_VT_DIR + 'r78x_J_v3b_dp_ema_vt_sau1_s42', drive_file='rs_J_bert_dong_ep4.pt', file_md5='735c00cf28b8e803e4f9248e8f453e46',
+                extra_files=(('backbone_ft.pt', '9bfa81f054193ccf0d0daa9d82495ca2', None),)),
+    EncoderSpec('vt_khong_luong', '(0) không luồng vùng', f'{_VT_ARCH}; lúc học KHÔNG luồng vùng (B1 + drop-path + EMA)', 518, 14, 768,
+                _G3(0.5307), _G3(0.2583), 'cls', 'checkpoint của ta: lượt 78x r78x_B1_dp_ema_s42 — rs_B1_ep4.pt (cấu hình cfg_kl nằm trong tệp)', 'của ta',
+                _VT_DATA, 'da_dung', _VT_SRC + _VT_THAT, 'token ảnh = forward RAD-DINO trọng số tinh chỉnh; không luồng vùng -> chỉ cổng cấu hình cfg_kl',
+                drive_dir=_VT_DIR + 'r78x_B1_dp_ema_s42', drive_file='rs_B1_ep4.pt', file_md5='679a0cdd48867f97601a520c44694b61'),
+):
+    SPECS[_s.name] = _s
+del _s
+
 ORDER = ('b', 'chexfound', 'raddino', 'biomedclip', 'mrm', 'chexzero', 'evax', 'pubmedclip', 'chexworld')   # 9 hàng của giao thức (khoá 13/11): họ phép so 32
 EXTRA_ROWS = ('asg',)                 # hàng thêm SAU khi giao thức đã khoá (0.10.0): bảng + hình có, KHÔNG vào họ 32 phép — họ riêng (PLAN_90 §2)
-ALL_ROWS = ORDER + EXTRA_ROWS
-assert set(ALL_ROWS) == set(SPECS) and len(ORDER) == 9 and not set(ORDER) & set(EXTRA_ROWS)
+ALL_ROWS = ORDER + EXTRA_ROWS         # hàng của bảng / hình / họ phép so chính của 89t (KHÔNG gồm hàng ablation)
+ABLATION_ROWS = ('vt_b4v2', 'vt_mot_chieu', 'vt_sau4', 'vt_sau1', 'vt_khong_luong')   # 0.11.0: PLAN_90 Việc B — hàng (3) đứng đầu = tham chiếu
+ABLATION_REF = 'vt_b4v2'
+ABLATION_STORE = 'kcb'                # PLAN_90 §10.2: Ver2, kho đệm vuông không cân bằng — kho duy nhất của hàng ablation
+assert set(ALL_ROWS) | set(ABLATION_ROWS) == set(SPECS) and len(ORDER) == 9 and not set(ORDER) & set(EXTRA_ROWS) and not set(ALL_ROWS) & set(ABLATION_ROWS)
+assert ABLATION_ROWS[0] == ABLATION_REF

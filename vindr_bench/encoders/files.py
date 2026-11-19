@@ -39,9 +39,10 @@ def _versions(spec, drive, name):
 
 
 def _fetch_one(spec, drive, name, md5, size, dest_dir, log):
+    '''size None (0.11.0, 5 hàng Việc B): chỉ ghim md5; kích thước tệp tải về phải = kích thước Drive liệt kê cho bản đã ghim (ghi lại trong kết quả).'''
     vs = _versions(spec, drive, name)
     assert vs, f'{spec.name}: khong co {name} trong {spec.drive_dir} tren Drive -> DUNG'
-    pin = [v for v in vs if v['md5'] == md5 and int(v['size']) == int(size)]
+    pin = [v for v in vs if v['md5'] == md5 and (size is None or int(v['size']) == int(size))]
     assert pin, (f"{spec.name}: {len(vs)} ban {name} tren Drive, KHONG ban nao co md5 / kich thuoc da ghim "
                  f"({[(v['md5'], v['size']) for v in vs]} != {md5} / {size}) -> DUNG")
     if len(vs) > 1:
@@ -54,8 +55,9 @@ def _fetch_one(spec, drive, name, md5, size, dest_dir, log):
         os.symlink(src, dst)
     except OSError:
         shutil.copyfile(src, dst)
-    assert os.path.getsize(dst) == int(size), f'{dst}: kich thuoc khac ban ghim -> DUNG'
-    return dict(tep=name, md5=pin[0]['md5'], byte=int(pin[0]['size']), so_ban=len(vs))
+    assert os.path.getsize(dst) == int(pin[0]['size']) and (size is None or os.path.getsize(dst) == int(size)), (
+        f'{dst}: kich thuoc {os.path.getsize(dst)} khac ban ghim ({size}) / Drive ({pin[0]["size"]}) -> DUNG')
+    return dict(tep=name, md5=pin[0]['md5'], byte=int(pin[0]['size']), so_ban=len(vs), ghim_kich_thuoc=size is not None)
 
 
 def fetch(spec, drive, dest_dir=None, log=print):

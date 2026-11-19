@@ -24,7 +24,7 @@ from .. import __version__
 from ..checks import weights as WT
 from ..data import loaders as L
 from ..data import vindr as V
-from ..encoders import BUILT, SPECS
+from ..encoders import ABLATION_ROWS, ABLATION_STORE, BUILT, SPECS
 from ..encoders import files as W
 from ..evaluation import metrics as M
 from ..evaluation import panels as P
@@ -112,6 +112,7 @@ def setup(encoder, store, package_dir, ns, log=print):
     assert encoder in BUILT, f'{encoder}: lop boc chua dung ({BUILT}) -> DUNG'
     assert store in STORES, f'kho {store!r} khong thuoc {STORES} -> DUNG'
     assert store != GEO.CROP_STORE or encoder in GEO.ROWS, f'{encoder}: khong thuoc phep thu hinh hoc ({GEO.ROWS}) -> khong chay kho {store}. DUNG'
+    assert encoder not in ABLATION_ROWS or store == ABLATION_STORE, f'{encoder}: hang Viec B chi chay kho {ABLATION_STORE} (PLAN_90 10.2) -> DUNG'
     drive = drive_api(ns)
     assert drive['RUN_TAG'] == run_tag(encoder, store), f"RUN_TAG {drive['RUN_TAG']!r} != {run_tag(encoder, store)!r} -> DUNG"
     import vindr_bench
@@ -153,6 +154,22 @@ def data(ctx, log=print):
     return vd
 
 
+def ablation_text(nap):
+    '''Dòng C4 của hàng Việc B (0.11.0): hàng, nguồn, trọng số EMA, luồng vùng đã dựng + cổng "trùng forward đầy đủ" (hàng chỉ đọc).'''
+    lu, cg, em = nap.get('luong'), nap.get('cong_chi_doc'), nap.get('ema') or {}
+    s = f"hang Viec B {nap.get('hang')} | {nap.get('nguon')} | trong so {nap.get('trong_so')} ({em.get('n')} lan cap nhat EMA)"
+    if lu:
+        s += (f" | luong vung {lu.get('lop')}: {lu.get('so_lop_jca_chay')} lop JCA chay, tang {lu.get('tang')}, hai chieu {lu.get('hai_chieu')}, g {lu.get('g')}, "
+              f"rho {lu.get('rho')}")
+    else:
+        s += ' | KHONG luong vung'
+    if cg:
+        s += (f" | cong chi doc: forward day du (block + luong vung) = token anh {'TUNG BIT' if cg['trung_bit'] else 'KHAC'} (lech max {cg['lech_max']:.1e}), "
+              f"{cg['so_lop_jca_chay']} / {cg['so_lop_can']} lop JCA chay, {cg['so_ti_le_ghi']} ti le ghi nguoc, {cg['so_anh']} anh tong hop {cg['thiet_bi']} "
+              f"{cg['kieu']}: {'DAT' if cg['dat'] else 'TRUOT'}")
+    return s
+
+
 def gate(ctx, log=print):
     '''C4. Lớp bọc + cổng nạp trọng số + số học bf16 so với fp32 (ghi số; chỉ dừng khi hỏng nặng — protocols/ours/gates.py).'''
     import torch
@@ -165,6 +182,8 @@ def gate(ctx, log=print):
         bb = BB.load(ctx['encoder'], ctx['device'], ctx['amp'])
     nap = bb.enc.nap
     log(f"nap trong so {'DAT' if nap['dat'] else 'TRUOT'} | {WT.loading_text(nap)}")
+    if ctx['encoder'] in ABLATION_ROWS:
+        log(ablation_text(nap))
     assert nap['dat'], 'nap trong so KHONG dat -> DUNG'
     _, tf_eval = L.build_transforms(bb.spec)
     ds = L.VinDrImages(vd.keys, vd.image_dir, tf_eval)
