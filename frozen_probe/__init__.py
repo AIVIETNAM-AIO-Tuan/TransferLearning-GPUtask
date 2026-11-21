@@ -9,7 +9,9 @@ Câu hỏi: backbone học CÓ luồng vùng (hàng (3) = B.4 v2) có cho đặc
     features.py    trích đặc trưng đông cứng 18.000 ảnh VinDr qua lớp bọc của vindr_bench (GPU) + tệp đặc trưng
     scoring.py     chấm (vindr_bench.evaluation: AP bậc thang / AUPRC hình thang / AUROC, bootstrap theo ảnh), ô = TB các lần rút, họ 6 phép + max-T,
                    hiệu mô tả, bảng
-    notebook/      extract.py (ô của 92a, G4) · probe.py (ô của 92b, CPU)
+    notebook/      extract.py (ô của 92a, G4) · probe.py (ô của 92b, CPU) · extract_bb.py (ô của 92d, G4) · probe_bb.py (ô của 92e, CPU)
+    config_bb.py   (0.2.0, PLAN_92 §13) hằng của phép kiểm cho ba cặp mới (DINOv3, CheXFound x1, BiomedCLIP); giao thức = config.py
+    encoders/      (0.2.0) lớp bọc đông cứng 6 hàng CÓ / KHÔNG luồng vùng (rows.py · bb_src.py chép nguyên văn khoi_bb_khac · bb.py)
 
 Gói phụ thuộc gói `vindr_bench` (module 89) ở commit ghim — lớp bọc, kho ảnh, cổng, hàm chấm KHÔNG chép lại. Không chứa ID Drive, không dữ liệu."""
-__version__ = '0.1.0'
+__version__ = '0.2.0'

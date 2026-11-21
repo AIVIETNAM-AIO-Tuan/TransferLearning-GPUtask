@@ -69,11 +69,16 @@ def per_draw(a, b):
 
 def family(cells):
     '''Họ 6 phép (3) − (0) (đặc trưng chính; PLAN_92 §11.3) -> dict(q, phep_so=[...], day_du). Thiếu ô nào -> họ CHƯA đủ: chỉ hiệu danh nghĩa, chưa áp luật.'''
+    return family_pair(cells, C.REF, C.CONTROL)
+
+
+def family_pair(cells, ref, control):
+    '''Họ 6 phép ref − control (đặc trưng chính; luật §11.3 — PLAN_92 §13.3 áp cho TỪNG cặp CÓ − KHÔNG của cùng backbone) -> như family().'''
     from vindr_bench.evaluation import compare as CP
     assert CP.MARGIN == C.MARGIN, 'nguong luat cua goi khac config -> DUNG'
     items = []
     for probe, f in C.FAMILY:
-        a, b = cells.get((C.REF, C.PRIMARY_FEATURE, probe, f)), cells.get((C.CONTROL, C.PRIMARY_FEATURE, probe, f))
+        a, b = cells.get((ref, C.PRIMARY_FEATURE, probe, f)), cells.get((control, C.PRIMARY_FEATURE, probe, f))
         if a is not None and b is not None:
             items.append((probe, f, a, b, CP.diff(a, b)))
     full = len(items) == len(C.FAMILY)
