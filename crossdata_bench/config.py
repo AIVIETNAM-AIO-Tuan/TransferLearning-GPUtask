@@ -74,3 +74,21 @@ FINGERPRINT = {
 def dataset(name):
     assert name in DATASETS, f'bo du lieu {name!r} khong thuoc {tuple(DATASETS)} -> DUNG'
     return DATASETS[name]
+
+
+# ---- bảng gộp 93t (0.2.0) ----
+SUMMARY_TAG = 'r93t_tong_hop'
+TABLE_ORDER = ('b', 'raddino', 'chexfound', 'chexworld', 'biomedclip', 'mrm', 'evax', 'chexzero', 'pubmedclip')     # = vindr_bench.encoders.spec.ORDER
+ROW_TITLES = {'b': 'B (của ta)', 'raddino': 'RAD-DINO', 'chexfound': 'CheXFound', 'chexworld': 'CheXWorld', 'biomedclip': 'BiomedCLIP', 'mrm': 'MRM',
+              'evax': 'EVA-X', 'chexzero': 'CheXzero', 'pubmedclip': 'PubMedCLIP'}
+# Số cụm của tập test (cổng của 93t): RSNA = người NIH (PLAN_88 §14.8, = bảng kho 93k); Shenzhen = ảnh.
+TEST_CLUSTERS = {'rsna': 2290, 'shenzhen': 134}
+# Mức tiếp xúc tiền huấn luyện (KHÔNG nhãn) với ảnh của bộ — chép từ bảng PLAN_93 §2 (nguồn: hồ sơ 88 / bài báo; chỗ "chưa kiểm" giữ nguyên). Ghi ở mọi bảng.
+EXPOSURE = {
+    'rsna': {'b': '100 % (thừa hưởng RAD-DINO)', 'raddino': '100 %', 'chexfound': '100 %', 'chexworld': '63,8 %', 'biomedclip': 'chưa xác minh', 'mrm': '0',
+             'evax': 'có (tỉ lệ chưa kiểm)', 'chexzero': '0', 'pubmedclip': 'chưa xác minh'},
+    'shenzhen': {'b': 'không', 'raddino': 'không', 'chexfound': 'không', 'chexworld': 'không', 'biomedclip': 'chưa xác minh', 'mrm': '0',
+                 'evax': 'không (theo danh sách nguồn)', 'chexzero': '0', 'pubmedclip': 'chưa xác minh'},
+}
+# Bảng VinDr của 89 (chỉ ĐỌC, để đặt cạnh thứ hạng; Ver2, kho đệm vuông không cân bằng = cùng giao thức + cùng kiểu kho): stage4_nb89/r89t_tong_hop
+VINDR_SUMMARY = dict(folder=('stage4_nb89', 'r89t_tong_hop'), pattern=r'tong_hop_89_\d{8}_\d{6}\.json', cell='v2|kcb|{enc}|{head}|luat', panel='p21')

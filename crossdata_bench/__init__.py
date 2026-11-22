@@ -13,8 +13,14 @@ main_classes / image_dir / store / sources) nên `vindr_bench.protocols.ours.pip
                       build.py (nguồn trên Drive + cổng toàn vẹn của 88, tải nhiều luồng, cổng mẫu, ghi tar + bảng + meta)
     protocol/         heads.py (một nhãn: thêm lại chiều lớp mà `squeeze(-1)` của Linear / GLoRI bỏ khi C = 1 — bọc run_head trong lúc chạy, C >= 2 không đổi)
                       · run.py (MainRun theo bộ, nhãn dòng in theo số lớp, gọi pipeline của 89)
-    evaluation/       single.py (AP bậc thang + AUPRC hình thang + AUROC, một nhãn và macro trên tập lớp cố định; hai nửa theo cụm người)
-    notebook/         store.py (notebook kho 93k) · run.py (notebook lượt 93v): một hàm cho mỗi ô
+    evaluation/       single.py (AP bậc thang + AUPRC hình thang + AUROC, một nhãn và macro trên tập lớp cố định; hai nửa theo cụm người) ·
+                      bootstrap.py (0.2.0: bootstrap theo cụm người NIH / theo ảnh, ô TB 5 hạt, hiệu ghép cặp, họ B − X + khoảng đồng thời max-T, điều
+                      khoản trần — hàm số đo / max_t / verdict của vindr_bench)
+    summary/          (0.2.0) collect.py (gom lượt 93v từ Drive + cổng từng lượt và giữa các lượt) · tables.py (bảng chữ mỗi bộ) · figures.py (hình mỗi bộ)
+    notebook/         store.py (notebook kho 93k) · run.py (notebook lượt 93v) · summary.py (notebook tổng hợp 93t): một hàm cho mỗi ô
 
-Gói không chứa ID Drive, không chứa dữ liệu (chỉ mã băm / số đếm)."""
-__version__ = '0.1.0'
+Gói không chứa ID Drive, không chứa dữ liệu (chỉ mã băm / số đếm).
+
+0.2.0 (22/11): notebook tổng hợp 93t — mỗi bộ một phần (bảng, luật, hình); không đổi gì của 0.1.0 trừ phần thêm vào config (tên hàng, mức tiếp xúc,
+số cụm test, tên lượt tổng hợp)."""
+__version__ = '0.2.0'
