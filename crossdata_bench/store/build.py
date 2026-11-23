@@ -3,7 +3,8 @@
 bảng + meta.
 
 - Nguồn: external_benchmarks.integrity @ 3c1ada7 (walk_drive + check_shenzhen / check_rsna: md5 + kích thước từng tệp / theo nhóm = mốc bản đã kiểm trên
-  máy; 88h đã chạy đạt 12/11). Ảnh tải bằng vindr_bench.data.crop_store.download_bytes (dịch vụ API riêng mỗi luồng, thử lại 5 lần, md5 + số byte = Drive)
+  máy; 88h đã chạy đạt 12/11); JSRT (0.3.0): datasets.jsrt.check_jsrt = cùng compare_files của 88 với mốc từng tệp datasets/jsrt_manifest (kiểm kê máy
+  23/11). Ảnh tải bằng vindr_bench.data.crop_store.download_bytes (dịch vụ API riêng mỗi luồng, thử lại 5 lần, md5 + số byte = Drive)
   qua crop_store.window (6 luồng, đúng thứ tự) — cách của 85 / 89k.
 - Chạy lại ô dựng: chỉ làm ảnh còn thiếu (_tt.jsonl local).
 - Cổng mẫu (16 ảnh cách đều): tải lại + chuyển lại = ảnh đã lưu TỪNG BIT (tất định); ảnh lưu ≈ letterbox thẳng 518 từ u8 (corr trung vị >= 0,99 — cổng hình học
@@ -30,9 +31,10 @@ ORIENT_WARN = 0.8
 EXPECTED_HEADER = {
     'rsna': {'pi': {'MONOCHROME2': 26684}, 'rows': {1024: 26684}, 'cols': {1024: 26684}, 'bits': {8: 26684}},
     'shenzhen': {'mode': {'P': 635, 'RGB': 27}},
+    'jsrt': {'mode': {'P': 247}, 'w': {2048: 247}, 'h': {2048: 247}},          # kiểm kê máy 23/11 (247 PNG palette ĐẢO đồng nhất)
 }
 HEADER_COLS = {'png': ('mode', 'w', 'h'), 'dicom': ('pi', 'ts', 'rows', 'cols', 'bits')}
-KIND = {'rsna': 'dicom', 'shenzhen': 'png'}
+KIND = {'rsna': 'dicom', 'shenzhen': 'png', 'jsrt': 'png'}
 
 
 def image_sources(name, duong, liet_ke, source):
@@ -55,6 +57,12 @@ def image_sources(name, duong, liet_ke, source):
             if f['cha'] == rsna.IMAGE_FOLDER and f['ten'].endswith('.dcm'):
                 imgs.setdefault(f['ten'][:-4], dict(id=f['id'], md5=f['md5'], size=f['size']))      # trùng tên = cùng md5 (check_rsna đã chặn khác)
         extra = {rsna.LABELS_CSV: res['csv']['chon'][rsna.LABELS_CSV]}
+    elif name == 'jsrt':
+        from ..datasets import jsrt
+        res = jsrt.check_jsrt(files)
+        assert res['dat'], 'JSRT tren Drive KHAC moc (kiem ke tren may 23/11) -> DUNG:\n' + integrity.summary('JSRT', res)
+        imgs = {n[:-4]: dict(id=f['id'], md5=f['md5'], size=f['size']) for n, f in res['png']['chon'].items()}
+        extra = {jsrt.METADATA_CSV: res['metadata']['chon'][jsrt.METADATA_CSV]}
     else:
         raise ValueError(name)
     return integrity.for_log(res), imgs, extra

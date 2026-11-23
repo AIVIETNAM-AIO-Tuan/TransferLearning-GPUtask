@@ -4,7 +4,8 @@ dịch vụ API riêng mỗi luồng như 85 / 89k).
 
     C2 setup    gói giải mã như 85 (pydicom + pylibjpeg; không ghim, ghi phiên bản) + thư mục local + hàm của khối Drive chuẩn
     C3 sources  ảnh gốc trên Drive: cổng toàn vẹn của 88 (md5 + kích thước = mốc) + bảng khoá / tách / cụm / nhãn (RSNA: tệp nối RSNA -> NIH tải theo URL công
-                khai + CSV nhãn trên Drive; Shenzhen: tệp chia BenchmarkTransformers theo commit) -> cổng số đếm + vân tay = ghim
+                khai + CSV nhãn trên Drive; Shenzhen: tệp chia BenchmarkTransformers theo commit; JSRT: nhãn theo tên tệp đối chiếu jsrt_metadata.csv trên
+                Drive (md5 ghim), chia phân tầng một lần) -> cổng số đếm + vân tay = ghim
     C4 build    tải QUA API (6 luồng) + giải mã + chuỗi kho 518 của 85 (đệm vuông, KHÔNG cân bằng) -> JPEG local; chạy lại ô: chỉ làm ảnh còn thiếu
     C5 pack     cổng (đủ ảnh, 518 x 518, header ảnh gốc = số đếm đã kiểm, mẫu tất định + hình học, chiều mức xám) rồi ghi (local) tar + bảng + meta
     C6 sync     dong_bo() + kiểm tệp trên Drive
@@ -23,7 +24,7 @@ from ..store import build as SB
 from ..store import chain
 
 DRIVE_NAMES = ('kiem_ke', 'tai', 'xung_dot', 'ghi', 'ghi_json', 'dong_bo', 'ten_tren_drive', 'RUN_TAG', 'GHI_LOC', '_duong', '_liet_ke')
-STORES = ('rsna', 'shenzhen')
+STORES = ('rsna', 'shenzhen', 'jsrt')
 
 
 def notebook_name(name):
@@ -75,6 +76,13 @@ def _table(ctx, extra, log):
         info = dict(tep_noi=dict(url=rsna.MAPPING_URL, md5=rsna.MAPPING_MD5, byte=rsna.MAPPING_SIZE), nhan_csv=dict(ten=rsna.LABELS_CSV, md5=RM.CSV[rsna.LABELS_CSV][0]),
                     chia=dict(don_vi='nguoi NIH', tang='nguoi co >= 1 anh duong', hat=rsna.SPLIT_SEED, ti_le=rsna.FRACTIONS))
         return rsna.table(mapping, labels), info
+    if name == 'jsrt':
+        from ..datasets import jsrt
+        from ..datasets import jsrt_manifest as JM
+        meta = jsrt.read_metadata(d['tai'](extra[jsrt.METADATA_CSV]), md5=JM.META[1])
+        info = dict(metadata=dict(ten=jsrt.METADATA_CSV, md5=JM.META[1]), nhan='ten tep: JPCLN = co not, JPCNN = khong not (doi chieu cot state)',
+                    chia=dict(don_vi='anh', tang='nhan', hat=jsrt.SPLIT_SEED, ti_le=jsrt.FRACTIONS), cum='moi anh mot cum (bo khong co ma nguoi)')
+        return jsrt.table(meta), info
     from external_benchmarks import config as EC
     from external_benchmarks import splits as ES
     from ..datasets import shenzhen
@@ -100,7 +108,9 @@ def sources(ctx, log=print):
     log(f"nguon MyDrive/{'/'.join(sp.source)}: kiem toan ven 88 DAT ({kiem['tong_tep_drive']:,} tep tren Drive) | {len(files):,} anh goc, dung {len(keys):,} | "
         + ' / '.join(f"{s} {fp[s]['so_anh']:,} anh ({fp[s]['so_duong'][0]:,} duong" + (f", {ng[s]:,} nguoi" if sp.unit == 'nguoi' else '') + ')'
                      for s in config.SPLITS)
-        + f" | van tay md5 khoa / nhan TRUNG ghim | {(time.time() - t0) / 60:.1f} phut")
+        + f" | van tay md5 khoa / nhan TRUNG ghim | {(time.time() - t0) / 60:.1f} phut"
+        + (f" | bo qua {kiem['so_trung_ten_bo_qua']} ban TRUNG TEN khac noi dung (da co ban trung moc), vd {kiem['trung_ten_bo_qua'][:3]}"
+           if kiem.get('so_trung_ten_bo_qua') else ''))
     return df
 
 
