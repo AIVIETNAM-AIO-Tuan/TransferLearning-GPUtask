@@ -9,21 +9,26 @@ main_classes / image_dir / store / sources) nên `vindr_bench.protocols.ours.pip
                       đơn vị bootstrap), vân tay khoá / nhãn từng tách (tính trên máy 22/11 từ nguồn đã ghim md5)
     datasets/         base.py (StoreData = giao diện VinDrData + nạp kho từ Drive + vân tay) · rsna.py (tệp nối RSNA -> người NIH, nhãn CSV, chia 60 / 20 / 20
                       theo người) · shenzhen.py (tệp chia BenchmarkTransformers đã ghim qua external_benchmarks.splits) · jsrt.py (0.3.0: nhãn theo tên tệp
-                      đối chiếu metadata, chia phân tầng một lần, cổng toàn vẹn theo mốc) · jsrt_manifest.py (mốc md5 + kích thước từng tệp, sinh từ máy)
+                      đối chiếu metadata, chia phân tầng một lần, cổng toàn vẹn theo mốc) · jsrt_manifest.py (mốc md5 + kích thước từng tệp, sinh từ máy) · chexpert.py (0.4.0: khoá theo đuôi đường dẫn, đọc / mô tả CSV, nhãn U / trống -> 0,
+                      tập học đề xuất theo người, tập lớp >= 10 ca dương ở test)
     store/            chain.py (giải mã PNG / DICOM -> chuỗi kho 518 đệm vuông của 85, KHÔNG cân bằng histogram — hàm của vindr_bench.data.crop_store) ·
-                      build.py (nguồn trên Drive + cổng toàn vẹn của 88, tải nhiều luồng, cổng mẫu, ghi tar + bảng + meta)
+                      build.py (nguồn trên Drive + cổng toàn vẹn của 88, tải nhiều luồng, cổng mẫu, ghi tar + bảng + meta) · listing.py (0.4.0: liệt kê cây lớn theo
+                      lô K thư mục mỗi lần gọi, theo tầng, nhiều luồng, tiếp tục theo tầng) · zip_remote.py (0.4.0: danh mục zip trên Drive qua Range)
     protocol/         heads.py (một nhãn: thêm lại chiều lớp mà `squeeze(-1)` của Linear / GLoRI bỏ khi C = 1 — bọc run_head trong lúc chạy, C >= 2 không đổi)
                       · run.py (MainRun theo bộ, nhãn dòng in theo số lớp, gọi pipeline của 89)
     evaluation/       single.py (AP bậc thang + AUPRC hình thang + AUROC, một nhãn và macro trên tập lớp cố định; hai nửa theo cụm người) ·
                       bootstrap.py (0.2.0: bootstrap theo cụm người NIH / theo ảnh, ô TB 5 hạt, hiệu ghép cặp, họ B − X + khoảng đồng thời max-T, điều
                       khoản trần — hàm số đo / max_t / verdict của vindr_bench)
     summary/          (0.2.0) collect.py (gom lượt 93v từ Drive + cổng từng lượt và giữa các lượt) · tables.py (bảng chữ mỗi bộ) · figures.py (hình mỗi bộ)
-    notebook/         store.py (notebook kho 93k) · run.py (notebook lượt 93v) · summary.py (notebook tổng hợp 93t): một hàm cho mỗi ô
+    notebook/         store.py (notebook kho 93k) · run.py (notebook lượt 93v) · summary.py (notebook tổng hợp 93t) · inventory.py (0.4.0: notebook kiểm kê
+                      CheXpert 93i, chỉ đọc): một hàm cho mỗi ô
 
 Gói không chứa ID Drive, không chứa dữ liệu (chỉ mã băm / số đếm).
 
 0.2.0 (22/11): notebook tổng hợp 93t — mỗi bộ một phần (bảng, luật, hình); không đổi gì của 0.1.0 trừ phần thêm vào config (tên hàng, mức tiếp xúc,
 số cụm test, tên lượt tổng hợp).
 0.3.0 (23/11): bộ JSRT (chỉ mô tả) — datasets/jsrt.py + jsrt_manifest.py, nhánh JSRT ở store/build.py + notebook/store.py, config (bộ, vân tay, số cụm test,
-mức tiếp xúc); RSNA / Shenzhen và mọi hàm của 0.1.0 / 0.2.0 không đổi."""
-__version__ = '0.3.0'
+mức tiếp xúc); RSNA / Shenzhen và mọi hàm của 0.1.0 / 0.2.0 không đổi.
+0.4.0 (24/11): kiểm kê CheXpert bản đầy đủ (notebook 93i, chỉ đọc) — datasets/chexpert.py, store/listing.py, store/zip_remote.py, notebook/inventory.py;
+chưa có kho / lượt CheXpert (config chưa có bộ 'chexpert'); mọi hàm của 0.1.0–0.3.0 không đổi."""
+__version__ = '0.4.0'
