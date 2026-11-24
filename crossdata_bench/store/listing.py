@@ -6,7 +6,13 @@ Vì sao không dùng external_benchmarks.integrity.walk_drive: nó gọi files.l
 của K thư mục cùng lúc: q = "('a' in parents or 'b' in parents …) and trashed = false" (trả về kèm `parents` để gán con cho đúng cha), duyệt theo TẦNG,
 nhiều luồng (dịch vụ API riêng mỗi luồng = cách của 85 / 89k). Máy chủ chê truy vấn (HTTP 400, vd quá nhiều vế OR) -> chia đôi lô, và K của các lô sau giảm
 theo; 403 / 429 / 5xx / lỗi mạng -> dịch vụ mới + chờ 2, 4, … 64 s, tối đa RETRIES lần. Mỗi tầng xong ghi trạng thái vào tệp local -> chạy lại ô thì tiếp
-từ tầng chưa xong (mất runtime: làm lại từ đầu). Không đi theo shortcut bên trong cây (đếm riêng). Không giữ trường chủ sở hữu / email."""
+từ tầng chưa xong (mất runtime: làm lại từ đầu). Không đi theo shortcut bên trong cây (đếm riêng). Không giữ trường chủ sở hữu / email.
+
+0.4.1 (Tuấn 24/11: "thiếu ảnh nào thì lấy từ zip ra, sau đó xoá zip"): thêm các lệnh GHI dùng ở ô C7 / C10 của 93i — get (quyền: ownedByMe,
+capabilities), find_child, create_folder, upload (md5 máy chủ = md5 dữ liệu, sai thì chuyển bản vừa lên vào thùng rác rồi thử lại), trash (chuyển vào thùng rác,
+KHÔNG xoá vĩnh viễn). create_folder / upload tra trước theo tên trong thư mục cha -> thử lại sau lỗi mạng không đẻ bản trùng."""
+import hashlib
+import io
 import os
 import pickle
 import threading
@@ -16,8 +22,20 @@ from concurrent.futures import ThreadPoolExecutor
 FOLDER_MIME = 'application/vnd.google-apps.folder'
 SHORTCUT_MIME = 'application/vnd.google-apps.shortcut'
 FIELDS = 'nextPageToken, files(id,name,mimeType,size,md5Checksum,parents)'
+GET_FIELDS = 'id,name,mimeType,size,md5Checksum,trashed,ownedByMe,capabilities(canTrash,canAddChildren)'
+UP_FIELDS = 'id,name,size,md5Checksum,parents'
 K_START, THREADS, MAX_DEPTH, RETRIES = 100, 6, 8, 8
 PAGE = 1000
+RESUMABLE_OVER = 4 << 20                                             # tệp > 4 MB tải lên kiểu resumable (multipart chỉ cho tệp nhỏ)
+
+
+def _esc(s):
+    return str(s).replace('\\', '\\\\').replace("'", "\\'")
+
+
+def default_media(data, mime):
+    from googleapiclient.http import MediaIoBaseUpload
+    return MediaIoBaseUpload(io.BytesIO(data), mimetype=mime, resumable=len(data) > RESUMABLE_OVER, chunksize=32 << 20)
 
 
 def status_of(e):
@@ -38,10 +56,10 @@ def default_api():
 
 
 class Lister:
-    def __init__(self, api_factory=default_api, threads=THREADS, k=K_START, retries=RETRIES, sleep=time.sleep, page=PAGE):
+    def __init__(self, api_factory=default_api, threads=THREADS, k=K_START, retries=RETRIES, sleep=time.sleep, page=PAGE, media=default_media):
         self._factory, self._tl, self._lock = api_factory, threading.local(), threading.Lock()
-        self.threads, self.k, self.retries, self._sleep, self.page = threads, k, retries, sleep, page
-        self.calls = self.retried = self.split = 0
+        self.threads, self.k, self.retries, self._sleep, self.page, self._media = threads, k, retries, sleep, page, media
+        self.calls = self.retried = self.split = self.writes = 0
 
     # ---- một lần gọi ----
     def _api(self):
@@ -112,6 +130,52 @@ class Lister:
                 raise IOError(f'Drive tra {len(data)} byte cho khoang {b - a + 1} byte')
             return data
         return self._retry(one)
+
+    # ---- một tệp: quyền / ghi (93i C7 / C10) ----
+    def get(self, file_id, fields=GET_FIELDS):
+        r = self._retry(lambda: self._api().files().get(fileId=file_id, fields=fields, supportsAllDrives=True).execute())
+        self._count('calls')
+        return r
+
+    def find_child(self, parent, name, folder=False):
+        '''Con (chưa vào thùng rác) tên đúng `name` của `parent`; folder=True -> chỉ thư mục.'''
+        q = f"'{parent}' in parents and name = '{_esc(name)}' and trashed = false" + (f" and mimeType = '{FOLDER_MIME}'" if folder else '')
+        return self.query(q)
+
+    def create_folder(self, parent, name):
+        '''-> id thư mục con `name` của `parent` (có sẵn thì dùng lại, không tạo bản trùng).'''
+        def one():
+            ex = self.find_child(parent, name, folder=True)
+            if ex:
+                return ex[0]['id']
+            r = self._api().files().create(body={'name': name, 'mimeType': FOLDER_MIME, 'parents': [parent]}, fields='id', supportsAllDrives=True).execute()
+            self._count('writes')
+            return r['id']
+        return self._retry(one)
+
+    def upload(self, parent, name, data, mime='application/octet-stream'):
+        '''Tải `data` lên thành tệp `name` trong `parent` -> dict(id, name, size, md5Checksum). Đã có bản cùng tên + cùng md5 + cùng kích thước (lần thử
+           trước đã lên) -> trả bản đó. md5 / kích thước máy chủ khác dữ liệu -> chuyển bản vừa lên vào thùng rác rồi lỗi (thử lại).'''
+        md5 = hashlib.md5(data).hexdigest()
+
+        def one():
+            for f in self.find_child(parent, name):
+                if f.get('md5Checksum') == md5 and int(f.get('size') or -1) == len(data):
+                    return f
+            r = self._api().files().create(body={'name': name, 'parents': [parent]}, media_body=self._media(data, mime), fields=UP_FIELDS,
+                                           supportsAllDrives=True).execute()
+            self._count('writes')
+            if r.get('md5Checksum') != md5 or int(r.get('size') or -1) != len(data):
+                self.trash(r['id'])
+                raise IOError(f"{name}: may chu md5 {r.get('md5Checksum')} / {r.get('size')} byte != du lieu {md5} / {len(data)} byte")
+            return r
+        return self._retry(one)
+
+    def trash(self, file_id):
+        '''Chuyển vào THÙNG RÁC (khôi phục được trong 30 ngày; vẫn tính dung lượng tới khi dọn) -> trashed của máy chủ.'''
+        r = self._retry(lambda: self._api().files().update(fileId=file_id, body={'trashed': True}, fields='id,trashed', supportsAllDrives=True).execute())
+        self._count('writes')
+        return bool(r.get('trashed'))
 
     # ---- cả cây ----
     def walk(self, root_id, max_depth=MAX_DEPTH, resume_path=None, log=print, every=60.0):

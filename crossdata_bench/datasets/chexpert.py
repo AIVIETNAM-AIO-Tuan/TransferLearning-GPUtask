@@ -5,9 +5,14 @@ Kiểm kê chỉ ĐỌC (Drive API) và in số tổng hợp; bảng đề xuấ
 trước khi dựng kho. Số "theo bài" (CheXpert, Irvin và cs. 2019): train 223.414 ảnh / 64.540 người, valid 234 / 200, test 668 / 500 (= 224.316 / 65.240) —
 để đối chiếu, không phải cổng.
 
-- Khoá ảnh = <tách CheXpert>_<patientNNNNN>_<studyN>_<viewN_frontal|lateral> lấy từ ĐUÔI đường dẫn (.../train|valid|test/patient…/study…/view….jpg) —
-  cùng một hàm cho cột `Path` của CSV và đường dẫn trên Drive (cây trên Drive có thể bọc thêm thư mục như `CheXpert-v1.0/`). Khoá hợp lệ cho tar phẳng
-  của kho (base._extract: [A-Za-z0-9_.-]+).
+- Khoá ảnh = <tách CheXpert>_<patientNNNNN>_<studyN>_<viewN_frontal|lateral> lấy từ ĐUÔI đường dẫn — cùng một hàm cho cột `Path` của CSV, đường dẫn
+  trên Drive và tên mục trong zip. Hai bố cục:
+    (1) .../train|valid|test/patient…/study…/view….jpg  (cột Path của CSV: 'CheXpert-v1.0/train/…'; cây có thể bọc thêm thư mục)
+    (2) .../<thư mục có "(train k)" | "(valid…" | "(test…">/patient…/study…/view….jpg — bản tải từng batch của Stanford AIMI giải nén (Drive thật 24/11:
+        'CheXpert-v1.0 batch 2 (train 1)/patient00001/study1/view1_frontal.jpg', KHÔNG có thư mục train/); mục zip không có thư mục tách thì lấy tách
+        từ tên zip (`hint` = split_hint(tên zip)).
+  0.4.0 chỉ nhận (1) -> 223.414 ảnh train trên Drive thành "không đúng dạng" (lượt 93i 24/11, Event). (1) thử trước nên khoá của CSV không đổi.
+  Khoá hợp lệ cho tar phẳng của kho (base._extract: [A-Za-z0-9_.-]+).
 - CSV: đọc toàn bộ là chuỗi (ô trống giữ là ''), nhãn: '1' / '1.0' -> 1; '0', '-1' (không chắc), '' (trống) -> 0 (PLAN_93 §10 điểm 6: U và trống tính âm).
   Giá trị khác -> đếm ở `khac`, không đoán.
 - Tập học (mặc định): chỉ ảnh THẲNG của CSV train; người sắp tăng -> hoán vị RandomState(SUBSET_SEED) -> lấy lần lượt từng người (mọi ảnh thẳng của người
@@ -27,15 +32,37 @@ META_COLUMNS = ('Path', 'Sex', 'Age', 'Frontal/Lateral', 'AP/PA')
 PAPER = {'train': (223414, 64540), 'valid': (234, 200), 'test': (668, 500)}       # (ảnh, người) theo bài — đối chiếu
 SPLITS_CX = ('train', 'valid', 'test')
 IMAGE_RE = re.compile(r'(?:^|/)(train|valid|test)/(patient\d+)/(study\d+)/(view\d+_(?:frontal|lateral))\.jpg$')
+TAIL_RE = re.compile(r'(?:^|/)(patient\d+)/(study\d+)/(view\d+_(?:frontal|lateral))\.jpg$')
+HINT_RE = re.compile(r'\((train|valid|test)', re.I)              # 'CheXpert-v1.0 batch 2 (train 1)' -> train; '… batch 1 (validate & csv)' -> valid
 SUBSET_SEED, N_TOTAL, N_VAL = 9302, 15000, 1500
 MIN_TEST_POS = 10
 ORDER = {'train': 0, 'val': 1, 'test': 2}
 
 
-def key_of(path):
-    '''Đường dẫn (cột Path hoặc đường trên Drive) -> khoá, hoặc None nếu không đúng dạng ảnh CheXpert.'''
-    m = IMAGE_RE.search(str(path).replace('\\', '/'))
-    return None if m is None else '_'.join(m.groups())
+def split_hint(name):
+    '''Tên thư mục batch / tên zip -> 'train' | 'valid' | 'test' | None (theo "(train …", "(valid…", "(test…").'''
+    m = HINT_RE.search(str(name))
+    return m.group(1).lower() if m else None
+
+
+def key_of(path, hint=None):
+    '''Đường dẫn (cột Path, đường trên Drive, tên mục zip) -> khoá, hoặc None nếu không đúng dạng ảnh CheXpert. Bố cục (1) trước; không khớp thì (2):
+       tách theo thư mục NGAY TRƯỚC patient… (split_hint), không có thì `hint` (tách của cả zip), không có nữa -> None.'''
+    p = str(path).replace('\\', '/')
+    m = IMAGE_RE.search(p)
+    if m:
+        return '_'.join(m.groups())
+    m = TAIL_RE.search(p)
+    if m is None:
+        return None
+    s = split_hint(p[:m.start(1)].rstrip('/').rpartition('/')[2]) or hint
+    return None if s is None else '_'.join((s,) + m.groups())
+
+
+def head_of(path):
+    '''Phần đường dẫn TRƯỚC patient… (gồm '/' cuối; '' nếu patient ở gốc), hoặc None nếu không có đuôi patient/study/view.jpg.'''
+    m = TAIL_RE.search(str(path).replace('\\', '/'))
+    return None if m is None else str(path).replace('\\', '/')[:m.start(1)]
 
 
 def parts(key):
