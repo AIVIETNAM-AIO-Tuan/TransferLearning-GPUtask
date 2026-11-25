@@ -12,6 +12,9 @@ trước khi dựng kho. Số "theo bài" (CheXpert, Irvin và cs. 2019): train 
         'CheXpert-v1.0 batch 2 (train 1)/patient00001/study1/view1_frontal.jpg', KHÔNG có thư mục train/); mục zip không có thư mục tách thì lấy tách
         từ tên zip (`hint` = split_hint(tên zip)).
   0.4.0 chỉ nhận (1) -> 223.414 ảnh train trên Drive thành "không đúng dạng" (lượt 93i 24/11, Event). (1) thử trước nên khoá của CSV không đổi.
+  0.4.2: (1) nhận thêm thư mục `val/` = tách `valid` (bộ CheXlocalize của Stanford AIMI: `CheXpert/val/patient…`, `CheXpert/test/patient…` — README
+  rajpurkarlab/cheXlocalize); khoá ghi `valid_…` như CheXpert -> val của CheXlocalize so được từng ảnh với valid của CheXpert. Đường dẫn CheXpert
+  không có thư mục `val/` nên khoá của 93i không đổi.
   Khoá hợp lệ cho tar phẳng của kho (base._extract: [A-Za-z0-9_.-]+).
 - CSV: đọc toàn bộ là chuỗi (ô trống giữ là ''), nhãn: '1' / '1.0' -> 1; '0', '-1' (không chắc), '' (trống) -> 0 (PLAN_93 §10 điểm 6: U và trống tính âm).
   Giá trị khác -> đếm ở `khac`, không đoán.
@@ -31,7 +34,8 @@ COMPETITION = ('Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pleural
 META_COLUMNS = ('Path', 'Sex', 'Age', 'Frontal/Lateral', 'AP/PA')
 PAPER = {'train': (223414, 64540), 'valid': (234, 200), 'test': (668, 500)}       # (ảnh, người) theo bài — đối chiếu
 SPLITS_CX = ('train', 'valid', 'test')
-IMAGE_RE = re.compile(r'(?:^|/)(train|valid|test)/(patient\d+)/(study\d+)/(view\d+_(?:frontal|lateral))\.jpg$')
+IMAGE_RE = re.compile(r'(?:^|/)(train|valid|val|test)/(patient\d+)/(study\d+)/(view\d+_(?:frontal|lateral))\.jpg$')
+SPLIT_ALIAS = {'val': 'valid'}                                     # 0.4.2: thư mục val/ của CheXlocalize = tách valid của CheXpert
 TAIL_RE = re.compile(r'(?:^|/)(patient\d+)/(study\d+)/(view\d+_(?:frontal|lateral))\.jpg$')
 HINT_RE = re.compile(r'\((train|valid|test)', re.I)              # 'CheXpert-v1.0 batch 2 (train 1)' -> train; '… batch 1 (validate & csv)' -> valid
 SUBSET_SEED, N_TOTAL, N_VAL = 9302, 15000, 1500
@@ -51,7 +55,8 @@ def key_of(path, hint=None):
     p = str(path).replace('\\', '/')
     m = IMAGE_RE.search(p)
     if m:
-        return '_'.join(m.groups())
+        s, *rest = m.groups()
+        return '_'.join([SPLIT_ALIAS.get(s, s)] + rest)
     m = TAIL_RE.search(p)
     if m is None:
         return None

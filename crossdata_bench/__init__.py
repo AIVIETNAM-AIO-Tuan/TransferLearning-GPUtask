@@ -10,7 +10,8 @@ main_classes / image_dir / store / sources) nên `vindr_bench.protocols.ours.pip
     datasets/         base.py (StoreData = giao diện VinDrData + nạp kho từ Drive + vân tay) · rsna.py (tệp nối RSNA -> người NIH, nhãn CSV, chia 60 / 20 / 20
                       theo người) · shenzhen.py (tệp chia BenchmarkTransformers đã ghim qua external_benchmarks.splits) · jsrt.py (0.3.0: nhãn theo tên tệp
                       đối chiếu metadata, chia phân tầng một lần, cổng toàn vẹn theo mốc) · jsrt_manifest.py (mốc md5 + kích thước từng tệp, sinh từ máy) · chexpert.py (0.4.0: khoá theo đuôi đường dẫn — 0.4.1: thêm bố cục batch,
-                      đọc / mô tả CSV, nhãn U / trống -> 0, tập học đề xuất theo người, tập lớp >= 10 ca dương ở test)
+                      đọc / mô tả CSV, nhãn U / trống -> 0, tập học đề xuất theo người, tập lớp >= 10 ca dương ở test; 0.4.2: thư mục val/ = valid) ·
+                      chexlocalize.py (0.4.2: bộ test chính thức CheXpert trong CheXlocalize — nhãn so groundtruth.csv GitHub ghim, val so valid CheXpert)
     store/            chain.py (giải mã PNG / DICOM -> chuỗi kho 518 đệm vuông của 85, KHÔNG cân bằng histogram — hàm của vindr_bench.data.crop_store) ·
                       build.py (nguồn trên Drive + cổng toàn vẹn của 88, tải nhiều luồng, cổng mẫu, ghi tar + bảng + meta) · listing.py (0.4.0: liệt kê cây lớn theo
                       lô K thư mục mỗi lần gọi, theo tầng, nhiều luồng, tiếp tục theo tầng; 0.4.1: quyền, tạo thư mục, tải lên kiểm md5, thùng rác) ·
@@ -22,7 +23,8 @@ main_classes / image_dir / store / sources) nên `vindr_bench.protocols.ours.pip
                       khoản trần — hàm số đo / max_t / verdict của vindr_bench)
     summary/          (0.2.0) collect.py (gom lượt 93v từ Drive + cổng từng lượt và giữa các lượt) · tables.py (bảng chữ mỗi bộ) · figures.py (hình mỗi bộ)
     notebook/         store.py (notebook kho 93k) · run.py (notebook lượt 93v) · summary.py (notebook tổng hợp 93t) · inventory.py (0.4.0: notebook kiểm kê
-                      CheXpert 93i; 0.4.1: + lấy ảnh thiếu từ zip, zip đã khớp -> thùng rác): một hàm cho mỗi ô
+                      CheXpert 93i; 0.4.1: + lấy ảnh thiếu từ zip, zip đã khớp -> thùng rác) · chexlocalize.py (0.4.2: notebook kiểm kê CheXlocalize
+                      93j, chỉ đọc): một hàm cho mỗi ô
 
 Gói không chứa ID Drive, không chứa dữ liệu (chỉ mã băm / số đếm).
 
@@ -34,5 +36,8 @@ mức tiếp xúc); RSNA / Shenzhen và mọi hàm của 0.1.0 / 0.2.0 không đ
 chưa có kho / lượt CheXpert (config chưa có bộ 'chexpert'); mọi hàm của 0.1.0–0.3.0 không đổi.
 0.4.1 (24/11): sửa sau lượt 93i đầu — khoá CheXpert nhận bố cục batch của Stanford AIMI ('… batch 2 (train 1)/patient…', không có thư mục train/; 0.4.0
 coi 223.414 ảnh train là "không đúng dạng"); so zip theo khoá / đường dẫn (không theo tên trần); ~1.000 ảnh mẫu theo zip; C7 lấy ảnh thiếu / lệch từ zip
-(chỉ khi tài khoản là chủ); C10 chuyển zip đã so khớp vào thùng rác (Tuấn 24/11). Khoá của cột Path CSV không đổi (vân tay = 0.4.0)."""
-__version__ = '0.4.1'
+(chỉ khi tài khoản là chủ); C10 chuyển zip đã so khớp vào thùng rác (Tuấn 24/11). Khoá của cột Path CSV không đổi (vân tay = 0.4.0).
+0.4.2 (25/11): Tuấn chia CheXpert theo CheXFound -> cần bộ test chính thức (không có trong gói CheXpert của AIMI; nằm trong CheXlocalize, Drive
+MIMIC_CXR/CheXlocalize) — datasets/chexlocalize.py + notebook/chexlocalize.py (notebook 93j, chỉ đọc); khoá CheXpert nhận thư mục val/ (= valid);
+inventory.csvs thêm tham số `expect` (mặc định như cũ). Khoá + kết quả của 93i không đổi."""
+__version__ = '0.4.2'

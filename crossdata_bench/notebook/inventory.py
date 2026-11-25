@@ -167,8 +167,8 @@ def tree(ctx, log=print):
 
 
 # ---------------- C4 ----------------
-def csvs(ctx, log=print):
-    '''C4. Tải + đọc mọi CSV của cây. -> {vai: CSV chọn}.'''
+def csvs(ctx, log=print, expect=CX.SPLITS_CX):
+    '''C4. Tải + đọc mọi CSV của cây. -> {vai: CSV chọn}. `expect`: tách phải có CSV (thiếu -> dòng ⚠); 93j (CheXlocalize, 0.4.2) chỉ valid + test.'''
     d, frames, cands = ctx['drive'], {}, []
     for f in sorted(ctx['cay']['files'], key=lambda x: x['duong']):
         if not f['ten'].lower().endswith('.csv'):
@@ -202,7 +202,7 @@ def csvs(ctx, log=print):
             log(f'    {lab:<27}' + ' | '.join(
                 ' / '.join(f"{chosen[r]['desc']['gia_tri_nhan'][lab].get(v, 0):,}" for v in ('1', '0', '-1', 'trong'))
                 + (f" (khac {chosen[r]['desc']['gia_tri_nhan'][lab]['khac']})" if chosen[r]['desc']['gia_tri_nhan'][lab].get('khac') else '') for r in roles))
-    for r in CX.SPLITS_CX:
+    for r in expect:
         if r not in chosen:
             log(f'  ⚠ khong co CSV vai {r}')
     return chosen
