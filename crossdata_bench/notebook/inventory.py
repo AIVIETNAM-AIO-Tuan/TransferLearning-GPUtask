@@ -162,7 +162,7 @@ def tree(ctx, log=print):
     for p, s in other[:60]:
         log(f'    {p}  ({s / 1e6:,.2f} MB)')
     if len(other) > 60:
-        log(f'    ... con {len(other) - 60:,} tep (du danh sach trong JSON o C9)')
+        log(f'    ... con {len(other) - 60:,} tep (du danh sach trong JSON ket qua)')
     return summ
 
 

@@ -26,6 +26,13 @@ GT_REPO = 'rajpurkarlab/cheXpert-test-set-labels'
 GT_SHA = 'a03eb3438ca55c28eb4379dd0dd09e3b38c0c414'                # đầu main 25/11; groundtruth.csv không đổi từ a930205df292 (21/10/2022)
 GT_URL = f'https://raw.githubusercontent.com/{GT_REPO}/{GT_SHA}/groundtruth.csv'
 GT_MD5 = 'f783258db67f6757003bfe8dfb0c376c'
+# 0.4.3 — nguồn ảnh val / test (notebook 93h): bản Redivis của CheXlocalize (trang AIMI hiện tại) CHỈ có thư mục CheXlocalize/ (= bản trên Drive, 93j 25/11);
+# thư mục CheXpert/ (val/, test/, val_labels.csv, test_labels.csv) chỉ còn ở trang AIMI CŨ trên Azure (ảnh chụp màn hình Tuấn 25/11: mức gốc CheXpert +
+# CheXlocalize, 5,73 GB, 3.256 tệp) — nút Download cấp link SAS cho cả container.
+AIMI_OLD = 'https://stanfordaimi.azurewebsites.net/datasets/23c56a0d-15de-405b-87c8-99c30138950c'
+AZ_PREFIX = 'CheXpert/'                                            # = tên thư mục con tạo trong MyDrive/MIMIC_CXR/CheXlocalize (giữ nguyên cấu trúc)
+AZ_CSV = ('val_labels.csv', 'test_labels.csv')
+AZ_FILES = 3256                                                    # "File count" của trang cũ — chỉ in để so, không phải cổng
 STUDY_RE = re.compile(r'(?:^|/)test/(patient\d+)/(study\d+)/?$')
 SPLIT_NAME = {'test': 'test', 'valid': 'val'}                      # tách CheXpert -> tách của bảng (config.SPLITS)
 

@@ -15,7 +15,8 @@ main_classes / image_dir / store / sources) nên `vindr_bench.protocols.ours.pip
     store/            chain.py (giải mã PNG / DICOM -> chuỗi kho 518 đệm vuông của 85, KHÔNG cân bằng histogram — hàm của vindr_bench.data.crop_store) ·
                       build.py (nguồn trên Drive + cổng toàn vẹn của 88, tải nhiều luồng, cổng mẫu, ghi tar + bảng + meta) · listing.py (0.4.0: liệt kê cây lớn theo
                       lô K thư mục mỗi lần gọi, theo tầng, nhiều luồng, tiếp tục theo tầng; 0.4.1: quyền, tạo thư mục, tải lên kiểm md5, thùng rác) ·
-                      zip_remote.py (0.4.0: danh mục zip trên Drive qua Range; 0.4.1: lấy một tệp ra từ xa)
+                      zip_remote.py (0.4.0: danh mục zip trên Drive qua Range; 0.4.1: lấy một tệp ra từ xa) ·
+                      azure_blob.py (0.4.3: container Azure qua link SAS — quyền / hạn, liệt kê, tải kiểm md5, che link)
     protocol/         heads.py (một nhãn: thêm lại chiều lớp mà `squeeze(-1)` của Linear / GLoRI bỏ khi C = 1 — bọc run_head trong lúc chạy, C >= 2 không đổi)
                       · run.py (MainRun theo bộ, nhãn dòng in theo số lớp, gọi pipeline của 89)
     evaluation/       single.py (AP bậc thang + AUPRC hình thang + AUROC, một nhãn và macro trên tập lớp cố định; hai nửa theo cụm người) ·
@@ -24,7 +25,7 @@ main_classes / image_dir / store / sources) nên `vindr_bench.protocols.ours.pip
     summary/          (0.2.0) collect.py (gom lượt 93v từ Drive + cổng từng lượt và giữa các lượt) · tables.py (bảng chữ mỗi bộ) · figures.py (hình mỗi bộ)
     notebook/         store.py (notebook kho 93k) · run.py (notebook lượt 93v) · summary.py (notebook tổng hợp 93t) · inventory.py (0.4.0: notebook kiểm kê
                       CheXpert 93i; 0.4.1: + lấy ảnh thiếu từ zip, zip đã khớp -> thùng rác) · chexlocalize.py (0.4.2: notebook kiểm kê CheXlocalize
-                      93j, chỉ đọc): một hàm cho mỗi ô
+                      93j, chỉ đọc) · fetch_chexpert.py (0.4.3: notebook 93h tải CheXpert/ của CheXlocalize từ Azure vào Drive): một hàm cho mỗi ô
 
 Gói không chứa ID Drive, không chứa dữ liệu (chỉ mã băm / số đếm).
 
@@ -39,5 +40,9 @@ coi 223.414 ảnh train là "không đúng dạng"); so zip theo khoá / đườ
 (chỉ khi tài khoản là chủ); C10 chuyển zip đã so khớp vào thùng rác (Tuấn 24/11). Khoá của cột Path CSV không đổi (vân tay = 0.4.0).
 0.4.2 (25/11): Tuấn chia CheXpert theo CheXFound -> cần bộ test chính thức (không có trong gói CheXpert của AIMI; nằm trong CheXlocalize, Drive
 MIMIC_CXR/CheXlocalize) — datasets/chexlocalize.py + notebook/chexlocalize.py (notebook 93j, chỉ đọc); khoá CheXpert nhận thư mục val/ (= valid);
-inventory.csvs thêm tham số `expect` (mặc định như cũ). Khoá + kết quả của 93i không đổi."""
-__version__ = '0.4.2'
+inventory.csvs thêm tham số `expect` (mặc định như cũ). Khoá + kết quả của 93i không đổi.
+0.4.3 (25/11): 93j chưa đạt — thư mục CheXpert/ (ảnh val + test chính thức + 2 CSV) không có trên Drive, không có ở bản Redivis; chỉ còn ở trang AIMI cũ trên
+Azure (Tuấn chọn cách 1: "làm cách 1 đi") — store/azure_blob.py (đọc container qua link SAS, chỉ thư viện chuẩn) + notebook/fetch_chexpert.py (notebook 93h:
+tải CheXpert/ thẳng vào MyDrive/MIMIC_CXR/CheXlocalize/CheXpert/, kiểm từng tệp); gộp: hạ logger googleapiclient.http, chữ "JSON ở C9" của
+inventory.tree. Khoá + kết quả của 93i / 93j không đổi."""
+__version__ = '0.4.3'

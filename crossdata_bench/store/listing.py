@@ -51,7 +51,9 @@ def status_of(e):
 
 
 def default_api():
+    import logging
     from googleapiclient.discovery import build
+    logging.getLogger('googleapiclient.http').setLevel(logging.ERROR)   # 0.4.3: cảnh báo "403 rateLimitExceeded" (Lister tự thử lại + đếm) không ra output
     return build('drive', 'v3', cache_discovery=False)
 
 
