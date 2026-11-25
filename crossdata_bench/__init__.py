@@ -51,5 +51,9 @@ inventory.tree. Khoá + kết quả của 93i / 93j không đổi.
 (5 nhãn, cỡ + ca dương test ghim, vân tay theo tiền tố) + kho CHIA PHẦN (datasets/base: shard_*, _fetch_shards, load_store; store/build.chexpert_sources;
 notebook/store_chexpert: phần lên Drive ngay qua luu_resume, C5 tải lại kiểm) + protocol/resume (lưu GIỮA giai đoạn vòng học 89 ~30 phút: bản chép
 train_parallel thêm điểm bắt đầu / điểm lưu; chạy tiếp = chạy liền) + notebook/run (C2 chặn hai phiên, C5 kiểm chạy tiếp = chạy liền, C6 lưu giữa giai
-đoạn + xoá phiên bản cũ) + notebook/sessions; store/chain thêm kiểu 'jpg'. Bộ cũ (RSNA / Shenzhen / JSRT): bảng, kho, ô notebook không đổi."""
-__version__ = '0.5.0'
+đoạn + xoá phiên bản cũ) + notebook/sessions; store/chain thêm kiểu 'jpg'. Bộ cũ (RSNA / Shenzhen / JSRT): bảng, kho, ô notebook không đổi.
+0.5.1 (25/11, kho CheXpert ĐO 3,5 ảnh / giây trên runtime CPU 2 nhân — CPU nghẽn; Tuấn "vậy bạn chỉnh đi"): store/build.threads_for (số luồng tải + chuyển ảnh =
+2 x CPU, 6..16; chỉ kho CheXpert); notebook/store_chexpert C4: phần đã ghi ở phiên này rồi ngắt giữa lúc tải lên -> chỉ tải lên tiếp (0.5.0: khối chuẩn chặn "ghi
+hai lần"); notebook/sessions: mã phiên lưu cả trong tệp GHI_LOC/.phien_93 (Restart session cùng máy = cùng phiên) + mở khoá MỘT LẦN bằng mã (MO_KHOA_PHIEN ở ô C2 =
+6 ký tự đầu mã phiên đang giữ khoá). Vòng học, bảng, kho, cách chấm không đổi."""
+__version__ = '0.5.1'

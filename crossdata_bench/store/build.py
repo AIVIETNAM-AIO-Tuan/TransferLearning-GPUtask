@@ -147,11 +147,19 @@ def make_one(kind, files, out_dir):
     return one
 
 
-def build(keys, kind, files, loc, out_dir, log=print):
-    '''Tải + chuyển mọi ảnh còn thiếu. -> (tt {khoá: header}, lỗi theo loại, cảnh báo theo loại, phút).'''
+def threads_for(cpu=None, lo=N_THREADS, hi=16):
+    '''(0.5.1, kho CheXpert) số luồng tải + chuyển ảnh theo số CPU của runtime: 2 x CPU, trong [lo, hi]. Runtime 2 nhân -> 6 luồng (= 0.5.0); 4 nhân -> 8;
+       >= 8 nhân -> 16. Kho CheXpert 0.5.0 ĐO 3,5 ảnh / giây trên runtime 2 nhân (CPU nghẽn: chuỗi kho ~121 ms CPU / ảnh đo trên máy).'''
+    c = os.cpu_count() if cpu is None else cpu
+    return max(lo, min(hi, 2 * int(c or 1)))
+
+
+def build(keys, kind, files, loc, out_dir, log=print, threads=None):
+    '''Tải + chuyển mọi ảnh còn thiếu (threads: None = N_THREADS như 0.1.0–0.5.0). -> (tt {khoá: header}, lỗi theo loại, cảnh báo theo loại, phút).'''
+    n_thr = N_THREADS if threads is None else int(threads)
     tt = done(loc, out_dir)
     todo = [k for k in keys if k not in tt]
-    log(f'anh {len(keys):,} | xong tu lan truoc {len(keys) - len(todo):,} | can lam {len(todo):,} ({N_THREADS} luong API)')
+    log(f'anh {len(keys):,} | xong tu lan truoc {len(keys) - len(todo):,} | can lam {len(todo):,} ({n_thr} luong API)')
     errs, warn_count, t0 = {}, collections.Counter(), time.time()
     one = make_one(kind, files, out_dir)
 
@@ -161,7 +169,7 @@ def build(keys, kind, files, loc, out_dir, log=print):
         warnings.simplefilter('always')
         warnings.showwarning = count_warning
         with open(_tt_path(loc), 'a', encoding='utf-8') as f:
-            for i, (k, r, ng) in enumerate(CS.window(todo, one, N_THREADS), 1):
+            for i, (k, r, ng) in enumerate(CS.window(todo, one, n_thr), 1):
                 err = ng or r[0]
                 if err is None:
                     tt[k] = r[1]

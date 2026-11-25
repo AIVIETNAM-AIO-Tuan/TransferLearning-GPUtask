@@ -60,8 +60,9 @@ def _packages():
     return {m.__name__: dict(phien_ban=m.__version__, sha=getattr(m, 'GOI_SHA', None)) for m in (crossdata_bench, vindr_bench, external_benchmarks)}
 
 
-def _resume_state(drive, log, my_token=None):
-    '''= ver2._resume_state, nhãn tệp theo r93v_<...>. 0.5.0: chặn hai phiên (sessions.lock_check) TRƯỚC khi khôi phục; in điểm lưu giữa giai đoạn.'''
+def _resume_state(drive, log, my_token=None, force=''):
+    '''= ver2._resume_state, nhãn tệp theo r93v_<...>. 0.5.0: chặn hai phiên (sessions.lock_check) TRƯỚC khi khôi phục; in điểm lưu giữa giai đoạn. 0.5.1: force
+       = MO_KHOA_PHIEN (mã mở khoá một lần).'''
     import torch
     tag = drive['RUN_TAG']
     path = drive['tim_moi_noi'](drive['TEN_RESUME'])
@@ -71,7 +72,7 @@ def _resume_state(drive, log, my_token=None):
     assert st.get('run') == tag, f"tep resume cua luot KHAC ({st.get('run')} != {tag}) -> DOI RUN_TAG o C0, KHONG xoa gi"
     if my_token is not None:
         age = SS.resume_age_min(drive['kiem_ke'], (config.FOLDER, tag), drive['TEN_RESUME'])
-        ok, msg = SS.lock_check(st, my_token, age)
+        ok, msg = SS.lock_check(st, my_token, age, force=force)
         log(f'phien: {msg}')
         assert ok, msg
     drive['khoi_phuc_cho'](st.get('cho'))
@@ -107,8 +108,8 @@ def setup(name, encoder, ns, log=print):
         f"o dia trong {mt['dia_trong_gb'] or 0:.0f} GB" + (f" | xung dot pip (ghi lai): {mt['xung_dot_pip']}" if mt['xung_dot_pip'] else ''))
     assert lib_ok, (f'bo thu vien KHAC bo da chot cua Ver2 {G.VER2_LIBS}: {lib_diff} (co / ghim) -> DUNG: KHONG chay tiep, gui Claude dong "moi truong Ver2" o tren')
     assert device == 'cuda' and G.gpu_gate(gpu), (f"GPU {gpu['ten']!r} khong phai G4 ({G.GPU_MARK}) -> Runtime > Change runtime type > G4, roi chay lai")
-    tok = SS.token(ns)
-    st = _resume_state(drive, log, my_token=tok)
+    tok = SS.token(ns, drive['GHI_LOC'])
+    st = _resume_state(drive, log, my_token=tok, force=ns.get('MO_KHOA_PHIEN') or '')
     ctx = dict(encoder=encoder, bo=name, kho=config.STORE_KEY, spec=spec, ds=sp, drive=drive, device=device, amp=amp, anh_dir=f'/content/x518_{name}', tt=st,
                moi_truong=dict(thu_vien=v, gpu=gpu, pip=mt), goi=_packages(), ns=ns, token=tok)
     main = R.main_run(name)

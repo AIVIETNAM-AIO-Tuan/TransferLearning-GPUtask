@@ -77,7 +77,7 @@ def setup(ns, api_factory=None, log=print):
     colab = 'google.colab' in sys.modules
     loc = '/content/kho93_chexpert' if colab else os.path.join(tempfile.mkdtemp(), 'kho93_chexpert')
     os.makedirs(os.path.join(loc, 'anh'), exist_ok=True)
-    tok = SS.token(ns)
+    tok = SS.token(ns, d['GHI_LOC'])
     st = dict(run=d['RUN_TAG'], t=time.strftime('%Y%m%d_%H%M%S'), phan={}, tt={}, phien=[])
     path = d['tim_moi_noi'](d['TEN_RESUME'])
     lost = []
@@ -85,7 +85,7 @@ def setup(ns, api_factory=None, log=print):
         got = torch.load(path, map_location='cpu', weights_only=False)
         assert got.get('run') == d['RUN_TAG'], f"tep resume cua luot KHAC ({got.get('run')}) -> DUNG"
         age = SS.resume_age_min(d['kiem_ke'], (config.FOLDER, d['RUN_TAG']), d['TEN_RESUME'])
-        ok, msg = SS.lock_check(got, tok, age)
+        ok, msg = SS.lock_check(got, tok, age, force=ns.get('MO_KHOA_PHIEN') or '')
         log(f'phien: {msg}')
         assert ok, msg
         # phần ghi trong tệp resume nhưng KHÔNG có trên Drive đúng md5 (tải lên hỏng rồi runtime chết) -> bỏ khỏi tiến độ VÀ khỏi danh sách "đã lên" TRƯỚC khi
@@ -100,9 +100,11 @@ def setup(ns, api_factory=None, log=print):
         st.update(t=got['t'], phan=phan, tt=dict(got.get('tt') or {}), phien=list(got.get('phien') or []))
     st_ = os.statvfs(loc) if hasattr(os, 'statvfs') else None
     free = st_.f_bavail * st_.f_frsize / 1e9 if st_ else float('nan')
-    ctx = dict(drive=d, spec=sp, loc=loc, lister=L.Lister(api_factory or L.default_api), goi=_packages(), colab=colab, tt=st, token=tok, ns=ns, t0=time.time())
+    ctx = dict(drive=d, spec=sp, loc=loc, lister=L.Lister(api_factory or L.default_api), goi=_packages(), colab=colab, tt=st, token=tok, ns=ns, t0=time.time(),
+               threads=SB.threads_for())
     log(f"93k {sp.title}: kho 518 dem vuong KHONG can bang histogram (chuoi kho kcb cua 85), CHIA PHAN {base.SHARD:,} anh | {os.cpu_count()} CPU | o dia trong "
-        f"{free:.0f} GB | {SB.N_THREADS} luong API | goi " + ', '.join(f"{k} {v['phien_ban']} @ {(v['sha'] or '?')[:12]}" for k, v in ctx['goi'].items()))
+        f"{free:.0f} GB | {ctx['threads']} luong tai + chuyen anh (2 x CPU, 6..16) | goi "
+        + ', '.join(f"{k} {v['phien_ban']} @ {(v['sha'] or '?')[:12]}" for k, v in ctx['goi'].items()))
     log('  ' + (f"RESUME: luot {st['t']} — {len(st['phan'])} phan da tren Drive (dung md5), {len(st['phien'])} phien truoc"
                 + (f" | {len(lost)} phan ghi trong tep resume nhung KHONG thay tren Drive -> C4 lam lai" if lost else '') if path
                 else 'phien dau (chua co tep resume)'))
@@ -189,14 +191,26 @@ def build(ctx, log=print):
         od = os.path.join(ctx['loc'], 'anh', f'p{k:02d}')
         os.makedirs(od, exist_ok=True)
         t1, errs = time.time(), {}
-        for _ in range(3):                                       # lỗi tải / giải mã từng ảnh: thử lại tối đa 3 lượt cho ảnh còn thiếu
-            tt, errs, warns, _m = SB.build(ks, SB.KIND[NAME], ctx['tep'], ctx['loc'], od, log=quiet)
-            if all(x in tt for x in ks):
-                break
-        assert all(x in tt for x in ks), f'{ten}: {sum(x not in tt for x in ks)} anh loi sau 3 luot (theo loai {errs}) -> chay lai C4; van loi -> gui Claude dong nay'
-        lp = d['ghi'](ten, lambda q: write_tar(q, od, ks))
-        st['phan'][ten] = dict(n=len(ks), md5_khoa=base.md5_keys(ks), md5=_md5_file(lp))
-        st['tt'].update({x: (tt[x]['mode'], int(tt[x]['w']), int(tt[x]['h'])) for x in ks})
+        da_ghi = (ctx.get('ns') or {}).get('DA_GHI') or {}                    # tệp đã ghi() trong PHIÊN này (khối chuẩn)
+        lp = os.path.join(d['GHI_LOC'], ten)
+        if ten in da_ghi and os.path.exists(lp):
+            # 0.5.1: tar của phần này đã ghi ở phiên này rồi bị ngắt giữa lúc tải lên -> KHÔNG ghi lại (khối chuẩn chặn "ghi hai lần"); tar còn trong hàng chờ,
+            # _save() -> cho_nho() tải lên tiếp. Header lấy từ _tt.jsonl (ảnh còn trên đĩa tới khi phần lên Drive) hoặc tiến độ đã có.
+            tt = SB.done(ctx['loc'], od)
+            md5 = da_ghi[ten]
+            log(f'  {ten}: tar da ghi o phien nay (ngat giua luc tai len) -> chi tai len tiep, khong dung lai')
+        else:
+            for _ in range(3):                                   # lỗi tải / giải mã từng ảnh: thử lại tối đa 3 lượt cho ảnh còn thiếu
+                tt, errs, warns, _m = SB.build(ks, SB.KIND[NAME], ctx['tep'], ctx['loc'], od, log=quiet, threads=ctx.get('threads'))
+                if all(x in tt for x in ks):
+                    break
+            assert all(x in tt for x in ks), f'{ten}: {sum(x not in tt for x in ks)} anh loi sau 3 luot (theo loai {errs}) -> chay lai C4; van loi -> gui Claude dong nay'
+            lp = d['ghi'](ten, lambda q: write_tar(q, od, ks))
+            md5 = _md5_file(lp)
+        miss = [x for x in ks if x not in tt and x not in st['tt']]
+        assert not miss, f'{ten}: thieu header anh goc cua {len(miss)} anh -> chay lai C4 sau khi Restart session; van loi -> gui Claude dong nay'
+        st['phan'][ten] = dict(n=len(ks), md5_khoa=base.md5_keys(ks), md5=md5)
+        st['tt'].update({x: (tt[x]['mode'], int(tt[x]['w']), int(tt[x]['h'])) for x in ks if x in tt})
         ok = _save(ctx)
         shutil.rmtree(od, ignore_errors=True)
         done_n += len(ks)
