@@ -36,7 +36,7 @@ class DatasetSpec:
     rule_metric: str              # số của luật B − X
     in_rule: bool                 # False: chỉ mô tả (JSRT)
     sizes: tuple                  # số ảnh (train, val, test) — cổng
-    positives: tuple              # số ảnh dương (train, val, test) — cổng (một nhãn)
+    positives: tuple              # số ảnh dương (train, val, test) — cổng. Một nhãn: số nguyên; nhiều nhãn (0.5.0): tuple theo nhãn hoặc None (chưa ghim)
     exposure: str                 # ghi chú tiếp xúc tiền huấn luyện (PLAN_93 §2)
 
     @property
@@ -62,7 +62,17 @@ DATASETS = {
     'jsrt': DatasetSpec('jsrt', 'JSRT (nốt phổi)', ('Nodule',), ('Nodule',), 100, ('MIMIC_CXR', 'JSRT'), 'anh', 'ap', False,
                         (148, 50, 49), (92, 31, 31), 'khong hang nao khai JSRT trong tien huan luyen (CheXFound: bai neu JSRT la bo danh gia ngoai, khong dung anh '
                         'nao; BiomedCLIP / PubMedCLIP chua xac minh)'),
+    # CheXpert (0.5.0, Tuấn 25/11: chia ĐÚNG CheXFound "(A)" + 5 nhãn cuộc thi): train = mọi ảnh thẳng train.csv (191.027), val = ảnh thẳng valid.csv (202),
+    # test = ảnh thẳng test_labels.csv của CheXlocalize (518 / 500 người; ảnh ở MIMIC_CXR/CheXlocalize/CheXpert/test, tải qua 93h); nhãn = datasets.chexpert
+    # .table_chexfound (CSV md5 ghim ở datasets.chexpert.CSV_PINS). Số dương train / val: đo ở 93k (chưa ghim -> None); test = 93j. 20 + 20 epoch như 89.
+    'chexpert': DatasetSpec('chexpert', 'CheXpert (chia CheXFound, 5 nhãn)', ('Cardiomegaly', 'Edema', 'Consolidation', 'Atelectasis', 'Pleural Effusion'),
+                            ('Cardiomegaly', 'Edema', 'Consolidation', 'Atelectasis', 'Pleural Effusion'), 20, ('MIMIC_CXR', 'CheXpert'), 'nguoi', 'ap', True,
+                            (191027, 202, 518), (None, None, (154, 79, 29, 158, 105)),
+                            'CheXpert nam trong tien huan luyen cua B (thua huong RAD-DINO) / RAD-DINO / CheXFound (train + valid, test giu rieng) / CheXWorld / '
+                            'EVA-X; MRM 0; CheXzero: anh 0, checkpoint chon theo val CheXpert (theo bai, chua kiem lai); BiomedCLIP / PubMedCLIP chua xac minh'),
 }
+# Thư mục ảnh test của CheXpert (0.5.0): CheXlocalize trên Drive (thư mục thật của Tuấn từ 25/11, chỉ có CheXpert/ — Event "Lượt 2 93h …").
+CHEXPERT_TEST_SOURCE = ('MIMIC_CXR', 'CheXlocalize')
 SPLITS = ('train', 'val', 'test')
 
 # Vân tay (md5 khoá, md5 nhãn) từng tách (= base.fingerprint_of) — tính trên máy 22/11 bằng datasets.<bộ>.table(...) từ nguồn đã ghim md5 (RSNA: tệp nối +
@@ -79,6 +89,10 @@ FINGERPRINT = {
              'val': ('bedcdbc2c0332aaec0a71a55059f0d75', '58671d6fe67e4e032cb9807946560afa'),
              'test': ('adabb1e2a4487e8bb3bdb69c7ff5e7b5', '7ed23b93dbdb0e28c9e23d04c9a57191')},
 }
+# Bộ CHƯA có vân tay đầy đủ (0.5.0): CheXpert — CSV không có ở máy, bảng chỉ dựng được trên Colab (93k) từ ba CSV md5 ghim. Cổng thay thế: md5 khoá của các tách
+# ghi ở đây phải BẮT ĐẦU bằng tiền tố (test: output 93j lượt 2, khoá sắp tăng = cách của kho) + số ảnh / số dương ghim ở DATASETS + md5 CSV ghim (meta kho).
+# Vân tay đủ của train / val: ghi sau khi 93k chạy (đo), trước bảng gộp 93t.
+FINGERPRINT_PREFIX = {'chexpert': {'test': '196ee1bc9cca'}}
 
 
 def dataset(name):
@@ -92,7 +106,7 @@ TABLE_ORDER = ('b', 'raddino', 'chexfound', 'chexworld', 'biomedclip', 'mrm', 'e
 ROW_TITLES = {'b': 'B (của ta)', 'raddino': 'RAD-DINO', 'chexfound': 'CheXFound', 'chexworld': 'CheXWorld', 'biomedclip': 'BiomedCLIP', 'mrm': 'MRM',
               'evax': 'EVA-X', 'chexzero': 'CheXzero', 'pubmedclip': 'PubMedCLIP'}
 # Số cụm của tập test (cổng của 93t): RSNA = người NIH (PLAN_88 §14.8, = bảng kho 93k); Shenzhen, JSRT = ảnh.
-TEST_CLUSTERS = {'rsna': 2290, 'shenzhen': 134, 'jsrt': 49}
+TEST_CLUSTERS = {'rsna': 2290, 'shenzhen': 134, 'jsrt': 49, 'chexpert': 500}
 # Mức tiếp xúc tiền huấn luyện (KHÔNG nhãn) với ảnh của bộ — chép từ bảng PLAN_93 §2 (nguồn: hồ sơ 88 / bài báo; chỗ "chưa kiểm" giữ nguyên). Ghi ở mọi bảng.
 EXPOSURE = {
     'rsna': {'b': '100 % (thừa hưởng RAD-DINO)', 'raddino': '100 %', 'chexfound': '100 %', 'chexworld': '63,8 %', 'biomedclip': 'chưa xác minh', 'mrm': '0',
@@ -102,6 +116,10 @@ EXPOSURE = {
     # JSRT: CheXFound — bảng II (CXR-987K, 12 nguồn) không có JSRT, §IV-B nêu JSRT là bộ đánh giá ngoài "none of the images … used" (đọc arXiv 2502.05142v2, 23/11)
     'jsrt': {'b': 'không', 'raddino': 'không', 'chexfound': 'không (bài: bộ đánh giá ngoài)', 'chexworld': 'không', 'biomedclip': 'chưa xác minh', 'mrm': '0',
              'evax': 'không (theo danh sách nguồn)', 'chexzero': '0', 'pubmedclip': 'chưa xác minh'},
+    # CheXpert: PLAN_93 §2 (cột CheXpert) + Event 25/11 "CheXpert: Tuấn muốn chia theo CheXFound …" (bài CheXFound: tiền huấn luyện train + valid, giữ test)
+    'chexpert': {'b': 'thừa hưởng RAD-DINO', 'raddino': 'có: 223.648 ảnh ≈ train + valid (suy từ số đếm, chưa kiểm)', 'chexfound': 'có: train + valid (bài); test chưa thấy',
+                 'chexworld': 'có, bỏ val / test (phụ lục B.1)', 'biomedclip': 'chưa xác minh', 'mrm': '0', 'evax': 'có (phần nào chưa kiểm)',
+                 'chexzero': 'ảnh 0; checkpoint chọn theo val CheXpert (theo bài, chưa kiểm lại)', 'pubmedclip': 'chưa xác minh'},
 }
 # Bảng VinDr của 89 (chỉ ĐỌC, để đặt cạnh thứ hạng; Ver2, kho đệm vuông không cân bằng = cùng giao thức + cùng kiểu kho): stage4_nb89/r89t_tong_hop
 VINDR_SUMMARY = dict(folder=('stage4_nb89', 'r89t_tong_hop'), pattern=r'tong_hop_89_\d{8}_\d{6}\.json', cell='v2|kcb|{enc}|{head}|luat', panel='p21')

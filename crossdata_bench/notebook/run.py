@@ -6,10 +6,14 @@ Mỗi hàm = một ô; trạng thái đi theo dict CTX; Drive qua khối chuẩn
     C3 data    kho 518 của bộ (93k) + cổng: md5 khoá = meta, số ảnh / số dương / cụm không vắt tách, vân tay = ghim
     C4 gate    GỌI NGUYÊN ver2.gate: trọng số -> lớp bọc + cổng nạp (từng tensor = tệp) + số học bf16 so với fp32 trên 16 ảnh val của bộ
     C5 smoke   chạy thử CẢ ba giai đoạn trên tập con (<= 512 / 256 / 256 ảnh) ở lô 256, đủ 4 loại đầu x 13 lr + cổng bộ nhớ GPU <= 70 % + phục hồi từ trạng
-               thái resume; bỏ qua khi lượt đang resume
-    C6 train   lượt thật (pipeline 89 nguyên văn, E = DatasetSpec.epochs); resume theo giai đoạn; dự đoán test MỘT lần
+               thái resume; 0.5.0: + lượt 2 + 2 epoch chạy liền và chạy có BA lần ngắt (giữa mỗi giai đoạn; nạp lại qua torch.save / load như phiên mới)
+               -> dự đoán val + test trùng (<= ROUNDTRIP_TOL); bỏ qua khi lượt đang resume
+    C6 train   lượt thật (pipeline 89 nguyên văn, E = DatasetSpec.epochs); resume theo giai đoạn; 0.5.0: + lưu GIỮA giai đoạn ~30 phút (protocol/resume) + xoá
+               phiên bản cũ của tệp resume + in tốc độ đo / giờ còn lại; dự đoán test MỘT lần
     C7 report  val cuối pha 1 + test: TB 5 hạt ± SD, ensemble, hai nửa theo cụm — CHỈ MÔ TẢ (khoảng tin cậy + luật: 93t); lỗi ở đây không làm mất C6
-    C8 sync    dong_bo() + kiểm tệp trên Drive"""
+    C8 sync    dong_bo() + kiểm tệp trên Drive
+0.5.0 (CheXpert (A), nhiều phiên): C2 chặn hai phiên cùng chạy một lượt (notebook/sessions); C3 nạp kho chia phần (datasets/base) — quota tải của một phần
+hết -> tải bản sao phía máy chủ."""
 import dataclasses
 import json
 import os
@@ -22,11 +26,17 @@ import numpy as np
 from .. import config
 from ..datasets import base
 from ..evaluation import single as S
+from ..protocol import resume as RS
 from ..protocol import run as R
+from . import sessions as SS
 
 MIN_FREE_GB = 15
 SMOKE_SUBSET = dict(train=512, val=256, test=256)
 ROUNDTRIP_TOL = 1e-3                      # = vindr_bench.notebook.ver2.ROUNDTRIP_TOL
+RESUME_STOPS = (('s1', 1), ('s2', 1), ('s3', 1))   # chạy thử chạy tiếp: ngắt sau bước 1 của MỖI giai đoạn (giữa epoch)
+# Lượt chạy tiếp của C5: 2 epoch mỗi giai đoạn -> sau mỗi lần ngắt còn >= 3 bước (với 1 epoch chỉ còn 1 bước: bước đó dùng lr đã nạp qua optimizer, lịch lr
+# nạp sai chỉ lộ từ bước SAU — đột biến R3 25/11 không bị bắt khi 1 epoch)
+RESUME_RUN = dict(epochs_phase1=2, epochs_phase2=2, n_seeds=2)
 
 
 def run_tag(name, encoder):
@@ -50,8 +60,8 @@ def _packages():
     return {m.__name__: dict(phien_ban=m.__version__, sha=getattr(m, 'GOI_SHA', None)) for m in (crossdata_bench, vindr_bench, external_benchmarks)}
 
 
-def _resume_state(drive, log):
-    '''= ver2._resume_state, nhãn tệp theo r93v_<...>.'''
+def _resume_state(drive, log, my_token=None):
+    '''= ver2._resume_state, nhãn tệp theo r93v_<...>. 0.5.0: chặn hai phiên (sessions.lock_check) TRƯỚC khi khôi phục; in điểm lưu giữa giai đoạn.'''
     import torch
     tag = drive['RUN_TAG']
     path = drive['tim_moi_noi'](drive['TEN_RESUME'])
@@ -59,10 +69,17 @@ def _resume_state(drive, log):
         return dict(run=tag, nhan=_label(tag), t=time.strftime('%Y%m%d_%H%M%S'), giai_doan={}, xong=[])
     st = torch.load(path, map_location='cpu', weights_only=False)
     assert st.get('run') == tag, f"tep resume cua luot KHAC ({st.get('run')} != {tag}) -> DOI RUN_TAG o C0, KHONG xoa gi"
+    if my_token is not None:
+        age = SS.resume_age_min(drive['kiem_ke'], (config.FOLDER, tag), drive['TEN_RESUME'])
+        ok, msg = SS.lock_check(st, my_token, age)
+        log(f'phien: {msg}')
+        assert ok, msg
     drive['khoi_phuc_cho'](st.get('cho'))
     gd = st.get('giai_doan') or {}
-    log(f"RESUME: luot {st['t']} — " + (f"da XONG ({st['xong']})" if st.get('xong') else f"da xong giai doan {sorted(k for k in gd if k in ('s1', 's2')) or '-'}")
-        + ' -> khoi phuc, KHONG chay lai phan da xong')
+    dang = gd.get('dang')
+    log(f"RESUME: luot {st['t']} — " + (f"da XONG ({st['xong']})" if st.get('xong') else f"da xong giai doan {sorted(k for k in gd if k in ('s1', 's2')) or '-'}"
+        + (f" + diem luu GIUA giai doan {dang['giai_doan']} o buoc {dang['buoc']:,} ({dang['t']})" if dang else ''))
+        + f" | da chay {len(gd.get('phien') or [])} phien -> khoi phuc, KHONG chay lai phan da xong")
     return dict(run=tag, nhan=_label(tag), t=st['t'], giai_doan=gd, xong=list(st.get('xong') or []))
 
 
@@ -90,9 +107,10 @@ def setup(name, encoder, ns, log=print):
         f"o dia trong {mt['dia_trong_gb'] or 0:.0f} GB" + (f" | xung dot pip (ghi lai): {mt['xung_dot_pip']}" if mt['xung_dot_pip'] else ''))
     assert lib_ok, (f'bo thu vien KHAC bo da chot cua Ver2 {G.VER2_LIBS}: {lib_diff} (co / ghim) -> DUNG: KHONG chay tiep, gui Claude dong "moi truong Ver2" o tren')
     assert device == 'cuda' and G.gpu_gate(gpu), (f"GPU {gpu['ten']!r} khong phai G4 ({G.GPU_MARK}) -> Runtime > Change runtime type > G4, roi chay lai")
-    st = _resume_state(drive, log)
+    tok = SS.token(ns)
+    st = _resume_state(drive, log, my_token=tok)
     ctx = dict(encoder=encoder, bo=name, kho=config.STORE_KEY, spec=spec, ds=sp, drive=drive, device=device, amp=amp, anh_dir=f'/content/x518_{name}', tt=st,
-               moi_truong=dict(thu_vien=v, gpu=gpu, pip=mt), goi=_packages())
+               moi_truong=dict(thu_vien=v, gpu=gpu, pip=mt), goi=_packages(), ns=ns, token=tok)
     main = R.main_run(name)
     log(f"encoder {spec.title}: {spec.arch}, anh {spec.image_size}, chuan hoa goc {spec.mean} / {spec.std}, vector toan anh {spec.pool} | bo {sp.title}, kho 518 "
         f"dem vuong KHONG can bang | dau: {[C.TITLES[k] for k in C.HEAD_KINDS]} | luoi {len(C.LR_GRID)} lr {C.LR_GRID[0]:g} .. {C.LR_GRID[-1]:g}, "
@@ -100,10 +118,31 @@ def setup(name, encoder, ns, log=print):
     return ctx
 
 
+def _quota_copier(ns, log):
+    '''Bản sao phía máy chủ của một phần kho khi quota tải của tệp hết (memory: "bản sao có quota mới") — vào thư mục kết quả của lượt, bỏ vào thùng rác sau khi tải.'''
+    parent = (ns or {}).get('DRV_ID')
+    if not parent:
+        return None
+    from ..store import listing as L
+
+    def copy(f):
+        api = L.default_api()
+        r = api.files().copy(fileId=f['id'], body={'name': f"_ban_sao_tam_{time.strftime('%H%M%S')}.tar", 'parents': [parent]}, fields='id,md5Checksum,size',
+                             supportsAllDrives=True).execute()
+
+        def cleanup():
+            try:
+                L.default_api().files().update(fileId=r['id'], body={'trashed': True}, supportsAllDrives=True).execute()
+            except Exception as e:
+                log(f'  ! bo ban sao tam vao thung rac khong duoc ({type(e).__name__}) -> xoa tay tep _ban_sao_tam_* trong thu muc ket qua')
+        return dict(id=r['id'], md5=r.get('md5Checksum') or f['md5'], size=int(r.get('size') or f['size'])), cleanup
+    return copy
+
+
 def data(ctx, log=print):
-    '''C3. Kho của bộ + cổng (base.load_store). -> StoreData.'''
+    '''C3. Kho của bộ + cổng (base.load_store; kho chia phần: tải song song + md5 từng phần). -> StoreData.'''
     d = ctx['drive']
-    sd = base.load_store(d['kiem_ke'], d['tai'], d['xung_dot'], ctx['anh_dir'], ctx['bo'], log=log)
+    sd = base.load_store(d['kiem_ke'], d['tai'], d['xung_dot'], ctx['anh_dir'], ctx['bo'], log=log, on_quota=_quota_copier(ctx.get('ns'), log))
     fp = sd.fingerprint()
     ctx.update(vindr=sd, van_tay=fp)
     log(sd.summary())
@@ -119,6 +158,81 @@ def gate(ctx, log=print):
 
 def _smoke_log(log):
     return lambda s='': log('  ' + s.strip()) if s.strip().startswith(('Ver2 ', 'xong:')) else None
+
+
+def curves_of(result):
+    '''Đường học KHÔNG phụ thuộc lr được chọn: mọi đầu dò lr + thêm hạt (auc / ap / auprc / auc21 / loss theo epoch) + loss pha 2.'''
+    out = {f'do_lr|{k}': v for k, v in result['do_lr'].items()}
+    out.update({f'them_seed|{k}': v for k, v in result['them_seed'].items()})
+    out.update({f'pha2|{k}': dict(loss=v['loss']) for k, v in result['pha2'].items()})
+    return out
+
+
+def curve_gap(a, b, keys=None):
+    '''Lệch TƯƠNG ĐỐI tối đa |x - y| / max(1, |x|) giữa hai bộ đường học trên các đầu `keys` (mặc định: mọi đầu chung); NaN phải cùng chỗ; khác số epoch / thiếu
+       đầu -> inf.'''
+    keys = sorted(set(a) & set(b)) if keys is None else list(keys)
+    m = 0.0
+    for k in keys:
+        if k not in a or k not in b or set(a[k]) != set(b[k]):
+            return float('inf')
+        for f in a[k]:
+            x, y = np.asarray(a[k][f], np.float64), np.asarray(b[k][f], np.float64)
+            if x.shape != y.shape or not np.array_equal(np.isnan(x), np.isnan(y)):
+                return float('inf')
+            ok = ~np.isnan(x)
+            if ok.any():
+                m = max(m, float((np.abs(x[ok] - y[ok]) / np.maximum(1.0, np.abs(x[ok]))).max()))
+    return m
+
+
+def resume_ok(hits, n_stops, info, lech, tol=ROUNDTRIP_TOL):
+    '''Luật đạt của "chạy tiếp = chạy liền" ở C5 (GPU): đủ lần ngắt + đường học lệch <= tol (mọi đầu dò lr; cùng lựa chọn thì mọi giai đoạn) + cùng lựa chọn
+       thì dự đoán lệch <= tol. Khác lựa chọn (hoà gần + nhiễu làm tròn GPU) chỉ chấp nhận khi đường học dò lr trùng.'''
+    return hits == n_stops and info['lech_duong'] <= tol and (info['chon_khac'] or lech <= tol)
+
+
+def resume_equal(sd, backbone, name, run_cfg, subset, ref_arrays, stops=RESUME_STOPS, log=None, protocol=None, out=None, ref_result=None):
+    '''(0.5.0) Chạy lại trên tập con với các lần NGẮT `stops` (Checkpointer.stop_after); giữa hai lần chạy, trạng thái đi qua torch.save -> torch.load (như
+       phiên mới: đầu, optimizer, kế hoạch dựng lại). -> (lệch tối đa |p| so với ref_arrays trên mọi mảng val_* / test_* — inf nếu bộ nhánh (lr được chọn)
+       KHÁC, số lần ngắt đã xảy ra, số mảng so). out (dict): + 'duong' (đường học của lần chạy tiếp), 'chon_khac' (bộ nhánh khác), 'lech_duong' (khi có
+       ref_result: lệch tương đối tối đa của đường học — không phụ thuộc lr được chọn). protocol: như R.prepare (None = mặc định 89; bộ kiểm máy dùng lưới nhỏ).'''
+    import io
+    import torch
+    blobs = []
+
+    def save(state):
+        b = io.BytesIO()
+        torch.save(state, b)
+        blobs.append(b.getvalue())
+        return True
+    quiet = (lambda s='': None) if log is None else log
+    state, hits, arrays, result = {}, 0, None, None
+    for stop in tuple(stops) + (None,):
+        pl = R.prepare(sd, backbone, name, main=run_cfg, subset=subset, protocol=protocol)
+        ck = RS.Checkpointer(state, save, every_s=1e12, log=quiet, stop_after=stop)
+        try:
+            with ck.active():
+                result, arrays = R.run(pl, state=state, save=ck.save_stage, run_tag='chay_thu_chay_tiep', log=quiet)
+        except RS.Interrupted:
+            hits += 1
+            state = torch.load(io.BytesIO(blobs[-1]), map_location='cpu', weights_only=False)
+            continue
+    assert arrays is not None and result is not None, 'chay tiep: lan chay cuoi khong xong -> DUNG'
+    names = sorted(k for k in ref_arrays if k.startswith(('val_', 'test_')))
+    got = sorted(k for k in arrays if k.startswith(('val_', 'test_')))
+    diff_arms = got != names                                    # lr được chọn khác (hoà gần + nhiễu GPU, hoặc chạy tiếp sai) -> so bằng đường học
+    lech = float('inf') if diff_arms else max(float(np.abs(np.asarray(arrays[k], np.float64) - np.asarray(ref_arrays[k], np.float64)).max()) for k in names)
+    if out is not None:
+        out.update(duong=curves_of(result), chon_khac=diff_arms, do_lr=result['do_lr'], them_seed=result['them_seed'],
+                   pha2={k: v['loss'] for k, v in result['pha2'].items()})
+        if ref_result is not None:
+            ref_c, got_c = curves_of(ref_result), out['duong']
+            keys = [k for k in ref_c if k.startswith('do_lr|')]                    # dò lr: mọi đầu, không phụ thuộc lựa chọn
+            if not diff_arms:
+                keys = sorted(ref_c)                                              # cùng lựa chọn: thêm hạt + pha 2 cũng phải trùng
+            out['lech_duong'] = curve_gap(ref_c, got_c, keys) if set(keys) <= set(got_c) else float('inf')
+    return lech, hits, len(names)
 
 
 def smoke(ctx, log=print):
@@ -141,16 +255,31 @@ def smoke(ctx, log=print):
     total = torch.cuda.get_device_properties(0).total_memory if ctx['device'] == 'cuda' else 0
     lech = R.roundtrip_check(pl, state, arrays)
     tests = [k for k in arrays if k.startswith('test_')]
+    t1 = time.time()                                                                            # 0.5.0: chạy tiếp (ngắt giữa mỗi giai đoạn) = chạy liền
+    run_ct = C.MainRun(**RESUME_RUN)
+    res_ct, ref_ct = R.run(R.prepare(sd, ctx['backbone'], ctx['bo'], main=run_ct, subset=sub), state={}, save=None, run_tag='chay_thu_lien', log=lambda s='': None)
+    info_ct = {}
+    lech_ct, hits, n_ct = resume_equal(sd, ctx['backbone'], ctx['bo'], run_ct, sub, ref_ct, out=info_ct, ref_result=res_ct)
+    del ref_ct, res_ct
+    ok_ct = resume_ok(hits, len(RESUME_STOPS), info_ct, lech_ct)
     ck = dict(so_buoc=result['kiem']['so_buoc_dung'], huu_han=result['kiem']['du_doan_huu_han'],
               bo_nho=(ctx['device'] != 'cuda' or G.memory_ok(peak, total)), phuc_hoi=lech <= ROUNDTRIP_TOL,
-              du_dau=len(tests) >= len(C.HEAD_KINDS) * run.n_seeds and all(arrays[k].shape == (sub['test'], len(sd.label_names)) for k in tests))
+              du_dau=len(tests) >= len(C.HEAD_KINDS) * run.n_seeds and all(arrays[k].shape == (sub['test'], len(sd.label_names)) for k in tests),
+              chay_tiep=ok_ct)
     thu = dict(dat=all(ck.values()), kiem=ck, gpu_dinh_gib=peak / 2 ** 30, gpu_tong_gib=total / 2 ** 30, lech_phuc_hoi=lech, so_dau_test=len(tests),
-               chon={k: {c: v[c]['lr'] for c in C.CRITERIA} for k, v in result['chon'].items()}, phut=(time.time() - t0) / 60, tap_con=sub)
+               chon={k: {c: v[c]['lr'] for c in C.CRITERIA} for k, v in result['chon'].items()}, phut=(time.time() - t0) / 60, tap_con=sub,
+               chay_tiep=dict(lech=lech_ct, lech_duong=info_ct['lech_duong'], chon_khac=info_ct['chon_khac'], so_lan_ngat=hits,
+                              diem_ngat=[list(x) for x in RESUME_STOPS], so_mang=n_ct, phut=(time.time() - t1) / 60))
     log(f"chay thu {'DAT' if thu['dat'] else 'TRUOT'} ({thu['phut']:.1f} phut; {len(C.HEAD_KINDS)} loai dau x {len(C.LR_GRID)} lr o lo {C.Protocol().batch_size}, "
         f"tap con {sub}, so do VO NGHIA): so buoc {'DAT' if ck['so_buoc'] else 'TRUOT'} | du doan huu han {'DAT' if ck['huu_han'] else 'TRUOT'} | "
         f"{len(tests)} bo du doan test dung hinh [{sub['test']}, {len(sd.label_names)}] {'DAT' if ck['du_dau'] else 'TRUOT'} | GPU dinh {thu['gpu_dinh_gib']:.1f} / "
         f"{thu['gpu_tong_gib']:.1f} GiB (nguong {G.MEM_LIMIT:.0%}: {'DAT' if ck['bo_nho'] else 'TRUOT'}) | phuc hoi tu trang thai resume: lech du doan val "
         f"{lech:.1e} (<= {ROUNDTRIP_TOL:g}: {'DAT' if ck['phuc_hoi'] else 'TRUOT'})")
+    log(f"  chay tiep = chay lien ({RESUME_RUN['epochs_phase1']} + {RESUME_RUN['epochs_phase2']} epoch): {hits} lan ngat ({', '.join(f'{g} buoc {b}' for g, b in RESUME_STOPS)}; "
+        f"nap lai qua torch.save / load nhu phien moi) | lech duong hoc (moi dau, tuong doi) {info_ct['lech_duong']:.1e} | "
+        + (f"lr chon KHAC lan chay lien (hoa gan do nhieu GPU — chap nhan vi duong hoc do lr trung) " if info_ct['chon_khac'] else
+           f"lech du doan val + test toi da {lech_ct:.1e} tren {n_ct} mang ")
+        + f"(nguong {ROUNDTRIP_TOL:g}: {'DAT' if ck['chay_tiep'] else 'TRUOT'}) | {thu['chay_tiep']['phut']:.1f} phut")
     del state, arrays, result, pl
     if ctx['device'] == 'cuda': torch.cuda.empty_cache()
     ctx['thu'] = thu
@@ -166,9 +295,29 @@ def _files(st):
     return f"luot_{st['nhan']}_{st['t']}.json", f"du_doan_{st['nhan']}_{st['t']}.npz"
 
 
-def train(ctx, log=print):
-    '''C6. Lượt thật có resume theo giai đoạn (tệp resume ghi đè sau giai đoạn (1), (2) và khi xong). -> kết quả (dict).'''
+def _saver(ctx, log):
+    '''save(giai_doan, xong=()) -> True / False: ghi tệp resume (luu_resume của khối chuẩn, kèm tệp đang chờ) rồi xoá phiên bản cũ của tệp trên Drive (0.5.0).'''
     import torch
+    d, st, ns = ctx['drive'], ctx['tt'], ctx.get('ns') or {}
+    api = []
+
+    def save(gd, xong=()):
+        ok = d['luu_resume'](lambda q: torch.save(dict(run=st['run'], t=st['t'], giai_doan=gd, xong=list(xong), cho=d['cho_nho']()), q))
+        if ok and ns.get('_RESUME_ID'):
+            if not api:
+                from ..store import listing as L
+                try:
+                    api.append(L.default_api())
+                except Exception:
+                    api.append(None)
+            SS.prune_revisions(api[0], ns.get('_RESUME_ID'), log)
+        return ok
+    return save
+
+
+def train(ctx, log=print, every_min=RS.EVERY_MIN):
+    '''C6. Lượt thật có resume theo giai đoạn (tệp resume ghi đè sau giai đoạn (1), (2) và khi xong) + 0.5.0: lưu GIỮA giai đoạn mỗi `every_min` phút
+       (protocol/resume.Checkpointer) — phiên đứt thì mở lại notebook (tài khoản nào cũng được, Editor của thư mục) -> Run all -> học tiếp từ điểm lưu. -> kết quả.'''
     from vindr_bench.protocols.ours import config as C
     from vindr_bench.protocols.ours import gates as G
     d, st, sd = ctx['drive'], ctx['tt'], ctx['vindr']
@@ -177,12 +326,18 @@ def train(ctx, log=print):
             ctx['kq'] = json.load(f)
         log(f"RESUME: luot da xong -> doc lai {st['xong'][0]} (khong hoc lai)")
         return ctx['kq']
-    save = lambda gd, xong=(): d['luu_resume'](lambda q: torch.save(dict(run=st['run'], t=st['t'], giai_doan=gd, xong=list(xong), cho=d['cho_nho']()), q))
+    save = _saver(ctx, log)
     pl = R.prepare(sd, ctx['backbone'], ctx['bo'])
-    result, arrays = R.run(pl, state=st['giai_doan'], save=save, run_tag=st['run'], log=log)
+    ck = RS.Checkpointer(st['giai_doan'], lambda gd: save(gd), every_s=float(every_min) * 60, log=log, plan_steps=dict(s1=pl.n1, s2=pl.n1, s3=pl.n2),
+                         token=ctx.get('token'))
+    log(f"luu giua giai doan moi ~{every_min:g} phut (diem luu + tep dang cho -> tep resume tren Drive; phien ban cu xoa) | buoc: do lr {pl.n1:,}, them hat {pl.n1:,}, "
+        f"pha 2 {pl.n2:,} | phien dut -> mo lai notebook (Editor nao cung duoc) -> Run all -> hoc tiep tu diem luu gan nhat")
+    with ck.active():
+        result, arrays = R.run(pl, state=st['giai_doan'], save=ck.save_stage, run_tag=st['run'], log=log)
     arrays.update(nhom_val=sd.groups[pl.va].astype(str), nhom_test=sd.groups[pl.te].astype(str))
     result.update(t=st['t'], bo=ctx['bo'], bo_ten=ctx['ds'].title, don_vi_cum=ctx['ds'].unit, tiep_xuc=ctx['ds'].exposure, encoder=dataclasses.asdict(ctx['spec']),
                   moi_truong=ctx['moi_truong'], goi=ctx['goi'], cong=ctx['cong'], van_tay=ctx['van_tay'], chay_thu=ctx.get('thu'), thu_vien_ghim=G.VER2_LIBS,
+                  phien_chay=list(st['giai_doan'].get('phien') or []), luu_giua_giai_doan_phien_cuoi=ck.saves,
                   mot_nhan='run_head boc: logit [B] -> [B, 1] (Linear / GLoRI squeeze(-1) khi C = 1); C >= 2 khong doi',
                   ghi_chu='PLAN_93 (= 89 Ver2 tren bo ngoai): du doan test MOT lan sau pha 2; so do test cham o C7 va 93t.')
     names = _files(st)

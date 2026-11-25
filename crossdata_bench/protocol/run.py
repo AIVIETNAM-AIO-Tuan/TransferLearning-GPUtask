@@ -38,10 +38,11 @@ def single_label_ok():
         yield
 
 
-def prepare(data, backbone, name, main=None, subset=None):
+def prepare(data, backbone, name, main=None, subset=None, protocol=None):
+    '''protocol (0.5.0): None = Protocol() mặc định của 89 (lượt thật); bộ kiểm máy truyền lưới lr nhỏ cho nhanh.'''
     from vindr_bench.protocols.ours import pipeline as PL
     assert data.dataset == name and data.store == config.STORE_KEY, (data.dataset, data.store)
-    return PL.prepare(data, backbone, main=main or main_run(name), subset=subset)
+    return PL.prepare(data, backbone, protocol=protocol, main=main or main_run(name), subset=subset)
 
 
 def run(plan, state=None, save=None, run_tag='', log=print):

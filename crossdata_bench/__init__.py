@@ -23,7 +23,8 @@ main_classes / image_dir / store / sources) nên `vindr_bench.protocols.ours.pip
                       bootstrap.py (0.2.0: bootstrap theo cụm người NIH / theo ảnh, ô TB 5 hạt, hiệu ghép cặp, họ B − X + khoảng đồng thời max-T, điều
                       khoản trần — hàm số đo / max_t / verdict của vindr_bench)
     summary/          (0.2.0) collect.py (gom lượt 93v từ Drive + cổng từng lượt và giữa các lượt) · tables.py (bảng chữ mỗi bộ) · figures.py (hình mỗi bộ)
-    notebook/         store.py (notebook kho 93k) · run.py (notebook lượt 93v) · summary.py (notebook tổng hợp 93t) · inventory.py (0.4.0: notebook kiểm kê
+    notebook/         store.py (notebook kho 93k) · run.py (notebook lượt 93v) · summary.py (notebook tổng hợp 93t) · store_chexpert.py (0.5.0: kho
+                      CheXpert chia phần 93k_kho_chexpert) · sessions.py (0.5.0: phiên, chặn hai phiên, xoá phiên bản cũ của tệp resume) · inventory.py (0.4.0: notebook kiểm kê
                       CheXpert 93i; 0.4.1: + lấy ảnh thiếu từ zip, zip đã khớp -> thùng rác) · chexlocalize.py (0.4.2: notebook kiểm kê CheXlocalize
                       93j, chỉ đọc) · fetch_chexpert.py (0.4.3: notebook 93h tải CheXpert/ của CheXlocalize từ Azure vào Drive): một hàm cho mỗi ô
 
@@ -44,5 +45,11 @@ inventory.csvs thêm tham số `expect` (mặc định như cũ). Khoá + kết 
 0.4.3 (25/11): 93j chưa đạt — thư mục CheXpert/ (ảnh val + test chính thức + 2 CSV) không có trên Drive, không có ở bản Redivis; chỉ còn ở trang AIMI cũ trên
 Azure (Tuấn chọn cách 1: "làm cách 1 đi") — store/azure_blob.py (đọc container qua link SAS, chỉ thư viện chuẩn) + notebook/fetch_chexpert.py (notebook 93h:
 tải CheXpert/ thẳng vào MyDrive/MIMIC_CXR/CheXlocalize/CheXpert/, kiểm từng tệp); gộp: hạ logger googleapiclient.http, chữ "JSON ở C9" của
-inventory.tree. Khoá + kết quả của 93i / 93j không đổi."""
-__version__ = '0.4.3'
+inventory.tree. Khoá + kết quả của 93i / 93j không đổi.
+0.5.0 (25/11): Tuấn chọn CheXpert (A) — chia đúng CheXFound (train 191.027 / val 202 / test 518 ảnh thẳng) — + 5 nhãn cuộc thi, chạy nhiều phiên Colab
+("dựng thật cẩn thận"): datasets/chexpert.table_chexfound (3 CSV md5 ghim; ảnh thẳng theo khoá = luật 'lateral' của CheXFound) + config bộ 'chexpert'
+(5 nhãn, cỡ + ca dương test ghim, vân tay theo tiền tố) + kho CHIA PHẦN (datasets/base: shard_*, _fetch_shards, load_store; store/build.chexpert_sources;
+notebook/store_chexpert: phần lên Drive ngay qua luu_resume, C5 tải lại kiểm) + protocol/resume (lưu GIỮA giai đoạn vòng học 89 ~30 phút: bản chép
+train_parallel thêm điểm bắt đầu / điểm lưu; chạy tiếp = chạy liền) + notebook/run (C2 chặn hai phiên, C5 kiểm chạy tiếp = chạy liền, C6 lưu giữa giai
+đoạn + xoá phiên bản cũ) + notebook/sessions; store/chain thêm kiểu 'jpg'. Bộ cũ (RSNA / Shenzhen / JSRT): bảng, kho, ô notebook không đổi."""
+__version__ = '0.5.0'

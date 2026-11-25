@@ -9,7 +9,9 @@ bảng + meta.
 - Chạy lại ô dựng: chỉ làm ảnh còn thiếu (_tt.jsonl local).
 - Cổng mẫu (16 ảnh cách đều): tải lại + chuyển lại = ảnh đã lưu TỪNG BIT (tất định); ảnh lưu ≈ letterbox thẳng 518 từ u8 (corr trung vị >= 0,99 — cổng hình học
   thô); chiều mức xám (giữa sáng hơn hai bên) theo nhóm mode / Photometric gốc và theo nhãn — cảnh báo, không dừng (= 85).
-Không in khoá ảnh RSNA (mã Kaggle) — chỉ số đếm."""
+Không in khoá ảnh RSNA (mã Kaggle) — chỉ số đếm.
+0.5.0: chexpert_sources (liệt kê theo lô hai cây CheXpert + CheXlocalize, ba CSV md5 ghim; không dùng mốc của 88 — CheXpert không có mốc từng tệp: md5 Drive
+từng ảnh + 93i đã so khớp zip); EXPECTED_HEADER['chexpert'] = mode L (93j: 902 / 902 ảnh val + test; train chưa đo mode)."""
 import collections
 import json
 import os
@@ -32,9 +34,51 @@ EXPECTED_HEADER = {
     'rsna': {'pi': {'MONOCHROME2': 26684}, 'rows': {1024: 26684}, 'cols': {1024: 26684}, 'bits': {8: 26684}},
     'shenzhen': {'mode': {'P': 635, 'RGB': 27}},
     'jsrt': {'mode': {'P': 247}, 'w': {2048: 247}, 'h': {2048: 247}},          # kiểm kê máy 23/11 (247 PNG palette ĐẢO đồng nhất)
+    # CheXpert (0.5.0): JPEG xám 8 bit — 93j đo mode L ở 902 / 902 ảnh val + test; train CHƯA đo mode (93i giải mã 1.023 ảnh mẫu, không in mode) -> kỳ vọng
+    # mọi ảnh 'L'; lệch -> C5 DỪNG (chạy lại C5 sau khi Claude xem, KHÔNG phải dựng lại kho: các phần đã trên Drive). Kích thước: không ghim (in ra).
+    'chexpert': {'mode': {'L': 191747}},
 }
-HEADER_COLS = {'png': ('mode', 'w', 'h'), 'dicom': ('pi', 'ts', 'rows', 'cols', 'bits')}
-KIND = {'rsna': 'dicom', 'shenzhen': 'png', 'jsrt': 'png'}
+HEADER_COLS = {'png': ('mode', 'w', 'h'), 'dicom': ('pi', 'ts', 'rows', 'cols', 'bits'), 'jpg': ('mode', 'w', 'h')}
+KIND = {'rsna': 'dicom', 'shenzhen': 'png', 'jsrt': 'png', 'chexpert': 'jpg'}
+
+
+def chexpert_sources(lister, duong, loc, log=print):
+    '''CheXpert (0.5.0): liệt kê theo lô (store.listing — như 93i, đo 6,9 phút cho cây CheXpert) hai cây: MyDrive/MIMIC_CXR/CheXpert (ảnh train + valid,
+       train.csv / valid.csv trong 'CheXpert-v1.0 batch 1 (validate & csv)') và MyDrive/MIMIC_CXR/CheXlocalize (CheXpert/test + CheXpert/test_labels.csv;
+       ảnh val/ ở đây = valid của CheXpert từng md5 (93j) -> KHÔNG lấy). -> (tóm tắt, {khoá: dict(id, md5, size)}, {vai CSV: dict(id, ten, md5, size,
+       duong)}). Dừng: thư mục sâu chưa duyệt, khoá trùng khác nội dung, ảnh không md5, CSV ghim không thấy đúng chỗ / md5.'''
+    from .. import config
+    from ..datasets import chexpert as CX
+    trees = (('chexpert', CX.SOURCE, ('train', 'valid'), ('train', 'valid')), ('chexlocalize', config.CHEXPERT_TEST_SOURCE, ('test',), ('test',)))
+    imgs, csvs, summ = {}, {}, {}
+    for tag, source, splits, roles in trees:
+        root = duong(source)
+        assert root, f"khong thay thu muc MyDrive/{'/'.join(source)} qua API -> DUNG"
+        res = lister.walk(root, resume_path=os.path.join(loc, f'_cay_{tag}.pkl'), log=log)
+        assert res['chua_duyet'] == 0, f"{tag}: {res['chua_duyet']} thu muc sau chua duyet -> DUNG"
+        by_key = collections.defaultdict(list)
+        for f in res['files']:
+            k = CX.key_of(f['duong'])
+            if k and CX.parts(k)[0] in splits:
+                by_key[k].append(f)
+        bad = sorted(k for k, v in by_key.items() if len({(x['md5'], x['size']) for x in v}) > 1)
+        assert not bad, f'{tag}: {len(bad)} khoa trung KHAC noi dung -> DUNG'
+        nomd5 = sum(1 for v in by_key.values() if not v[0]['md5'])
+        assert nomd5 == 0, f'{tag}: {nomd5} anh khong co md5 tren Drive -> DUNG'
+        for k, v in by_key.items():
+            assert k not in imgs, f'{k[:6]}…: khoa o ca hai cay -> DUNG'
+            imgs[k] = dict(id=v[0]['id'], md5=v[0]['md5'], size=int(v[0]['size']))
+        for role in roles:
+            ten, md5, _ = CX.CSV_PINS[role]
+            c = [f for f in res['files'] if f['ten'] == ten and f['duong'].rpartition('/')[0].rpartition('/')[2] == CX.CSV_DIR[role]]
+            ok = [f for f in c if f['md5'] == md5]
+            assert ok, (f"{role}: khong thay {CX.CSV_DIR[role]}/{ten} md5 {md5[:8]}… trong MyDrive/{'/'.join(source)} (thay {len(c)} ban cung ten, md5 "
+                        f"{[f['md5'][:8] for f in c]}) -> DUNG")
+            csvs[role] = dict(id=ok[0]['id'], ten=ten, md5=md5, size=int(ok[0]['size']), duong=ok[0]['duong'])
+        per = collections.Counter(CX.parts(k)[0] for k in by_key)
+        summ[tag] = dict(tep=len(res['files']), thu_muc=len(res['folders']), anh=dict(per), phut=round(res['thong_ke']['phut'], 1),
+                         lan_goi=res['thong_ke']['lan_goi'], trung_nhieu_cho=sum(len(v) > 1 for v in by_key.values()))
+    return summ, imgs, csvs
 
 
 def image_sources(name, duong, liet_ke, source):

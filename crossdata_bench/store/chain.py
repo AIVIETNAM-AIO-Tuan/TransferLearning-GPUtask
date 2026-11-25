@@ -6,6 +6,7 @@
                   -> 518 BICUBIC -> JPEG q95; không cửa sổ DICOM; header phải qua đúng các kiểm tra của 85 (crop_store.decode)
     PNG (Shenzhen) Image.convert('L') (áp palette -> mức xám thật; 334 / 662 ảnh Shenzhen có palette ĐẢO lệch theo nhãn — 88) -> cùng chuỗi từ bước trừ
                   min / chia max (= decode_png của 88: min-max -> uint8, rồi chuỗi 85)
+    JPEG (CheXpert, 0.5.0) cùng hàm với PNG (Pillow mở JPEG, convert('L')); chỉ khác chữ 'cach' ghi trong meta
 
 Một ảnh = một hàm thuần (bytes -> ảnh 518) để cổng mẫu chạy lại được và so từng bit."""
 import io
@@ -15,12 +16,15 @@ from PIL import Image
 
 from vindr_bench.data import crop_store as CS
 
-KINDS = ('png', 'dicom')
+KINDS = ('png', 'dicom', 'jpg')
 CACH = {
     'png': ('PNG -> convert(L) (ap palette) -> tru min / chia max / cat uint8 -> KHONG equalizeHist -> JPEG q95 cv2 -> letterbox 1022 (canh DAI, dem '
             'vien 0) BICUBIC -> JPEG q90 -> 518 BICUBIC -> JPEG q95 (= chuoi kho kcb cua 85)'),
     'dicom': ('DICOM pixel -> tru min / chia max / cat uint8 -> dao MONOCHROME1 -> KHONG equalizeHist -> JPEG q95 cv2 -> letterbox 1022 (canh DAI, dem '
               'vien 0) BICUBIC -> JPEG q90 -> 518 BICUBIC -> JPEG q95; KHONG cua so DICOM (= chuoi kho kcb cua 85)'),
+    # 0.5.0 (CheXpert bản đầy đủ: JPEG 8 bit, 93j: mode L 902 / 902 ảnh val + test) — cùng hàm với PNG (Pillow mở JPEG), chỉ khác chữ ghi trong meta
+    'jpg': ('JPEG goc -> convert(L) -> tru min / chia max / cat uint8 -> KHONG equalizeHist -> JPEG q95 cv2 -> letterbox 1022 (canh DAI, dem vien 0) '
+            'BICUBIC -> JPEG q90 -> 518 BICUBIC -> JPEG q95 (= chuoi kho kcb cua 85)'),
 }
 SIDE_OUT = CS.SIDE_OUT
 
@@ -49,7 +53,7 @@ def dicom_u8(b):
 
 def to_u8(kind, b):
     assert kind in KINDS, kind
-    return png_u8(b) if kind == 'png' else dicom_u8(b)
+    return dicom_u8(b) if kind == 'dicom' else png_u8(b)            # 'png' và 'jpg' (0.5.0): cùng đường Pillow convert('L')
 
 
 def to_518(u8):

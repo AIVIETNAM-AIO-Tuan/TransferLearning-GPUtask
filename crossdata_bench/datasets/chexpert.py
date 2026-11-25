@@ -21,7 +21,9 @@ trước khi dựng kho. Số "theo bài" (CheXpert, Irvin và cs. 2019): train 
 - Tập học (mặc định): chỉ ảnh THẲNG của CSV train; người sắp tăng -> hoán vị RandomState(SUBSET_SEED) -> lấy lần lượt từng người (mọi ảnh thẳng của người
   đó): người đầu vào val tới khi val >= N_VAL ảnh, rồi vào train tới khi tổng >= N_TOTAL ảnh. Không người nào ở hai tách.
 - Test (mặc định): CSV test (bác sĩ gán) nếu có, không thì CSV valid — chỉ ảnh thẳng; nhóm bootstrap = người.
-- Tập lớp của luật: lớp có >= MIN_TEST_POS ảnh dương ở test (đặt trước, đếm trên nhãn — không nhìn dự đoán); 5 nhãn cuộc thi báo kèm."""
+- Tập lớp của luật: lớp có >= MIN_TEST_POS ảnh dương ở test (đặt trước, đếm trên nhãn — không nhìn dự đoán); 5 nhãn cuộc thi báo kèm.
+- 0.5.0 (Tuấn 25/11: "(A)" + 5 nhãn): bảng đề xuất / tập lớp ở trên KHÔNG dùng cho kho. Kho dùng table_chexfound (cuối tệp) = cách chia của CheXFound:
+  train = mọi ảnh thẳng train.csv, val = ảnh thẳng valid.csv, test = ảnh thẳng test_labels.csv (CheXlocalize); 5 nhãn CHEXFOUND_LABELS; ba CSV md5 ghim."""
 import collections
 import re
 
@@ -207,3 +209,61 @@ def class_set(t, min_pos=None):
     min_pos = MIN_TEST_POS if min_pos is None else min_pos
     pos = positives(t)['test']
     return [c for c in LABELS if pos[c] >= min_pos]
+
+
+# ---------------- 0.5.0: cách chia của CheXFound (Tuấn 25/11: "(A)" + 5 nhãn) ----------------
+# CheXFound-main/chexfound/data/datasets/chexpert.py (đọc 25/11): đọc <tách>.csv, bỏ dòng có 'lateral' trong Path, fillna(0), giữ 5 cột, replace(-1, 0);
+# số dòng ghi cứng train 191.027 / val 202 / test 518. Ở đây: train = train.csv, val = valid.csv, test = test_labels.csv của CheXlocalize (bộ test chính thức;
+# 93h tải, 93j kiểm nhãn = groundtruth.csv GitHub). Lọc ảnh thẳng theo khoá (view…_frontal) VÀ đếm lại theo luật của CheXFound (Path không chứa 'lateral') —
+# hai cách phải ra cùng số dòng, không thì dừng.
+CHEXFOUND_LABELS = ('Cardiomegaly', 'Edema', 'Consolidation', 'Atelectasis', 'Pleural Effusion')    # thứ tự cột của CheXFound
+CHEXFOUND_SIZES = {'train': 191027, 'val': 202, 'test': 518}
+# vai CSV -> (tên tệp, md5, số dòng): ĐO trên Drive — train / valid ở output 93i 0.4.1 (25/11), test ở output 93j lượt 2 (25/11). valid.csv có md5 TRÙNG
+# val_labels.csv của CheXlocalize (93j).
+CSV_PINS = {'train': ('train.csv', 'd8e53af9a37651cea91a569c3c138558', 223414),
+            'valid': ('valid.csv', '7e8ccffcffa96a2b90e09c7b9335d4de', 234),
+            'test': ('test_labels.csv', '6fd4befe8d38a7da732c96e62b320f82', 668)}
+CSV_DIR = {'train': 'CheXpert-v1.0 batch 1 (validate & csv)', 'valid': 'CheXpert-v1.0 batch 1 (validate & csv)', 'test': 'CheXpert'}   # thư mục chứa CSV
+TEST_POSITIVES = (154, 79, 29, 158, 105)       # ảnh thẳng test dương theo CHEXFOUND_LABELS (output 93j lượt 2: Cardiomegaly / Edema / Consolidation / Atelectasis / Pleural Effusion)
+TEST_KEY_MD5_PREFIX = '196ee1bc9cca'           # md5 khoá ảnh thẳng test (khoá sắp tăng, base.md5_keys) — output 93j lượt 2
+SPLIT_OF_ROLE = {'train': 'train', 'valid': 'val', 'test': 'test'}
+
+
+def chexfound_frontal_count(df):
+    '''Số dòng CheXFound giữ: Path KHÔNG chứa 'lateral' (đúng biểu thức của mã CheXFound).'''
+    return int((~df['Path'].astype(str).str.contains('lateral')).sum())
+
+
+def table_chexfound(frames, labels=CHEXFOUND_LABELS):
+    '''frames = {'train': train.csv, 'valid': valid.csv, 'test': test_labels.csv} (DataFrame chuỗi, read_csv) -> bảng kho: khoa, tach (train / val / test),
+       nhom (= người), 5 nhãn (int8: 1 khi giá trị 1; 0 / -1 / trống -> 0 như CheXFound), ap_pa, nguon (vai CSV); thứ tự train, val, test, khoá sắp tăng
+       trong mỗi tách. Dừng khi: Path sai dạng, khoá trùng, số ảnh thẳng theo khoá != số dòng CheXFound giữ, nhãn có giá trị lạ (không thuộc 1 / 0 / -1 /
+       trống — CheXFound giữ nguyên giá trị lạ, ở đây không đoán).'''
+    import pandas as pd
+    parts_, info = [], {}
+    for role in ('train', 'valid', 'test'):
+        df = frames[role]
+        miss = [c for c in ('Path',) + tuple(labels) if c not in df.columns]
+        assert not miss, f'{role}: CSV thieu cot {miss} -> DUNG'
+        keys = [key_of(p) for p in df.Path]
+        bad = sum(k is None for k in keys)
+        assert bad == 0, f'{role}: {bad} dong Path sai dang -> DUNG'
+        assert len(set(keys)) == len(keys), f'{role}: khoa trung trong CSV -> DUNG'
+        assert all(parts(k)[0] == role for k in keys), f'{role}: Path chua tach khac {role} -> DUNG'
+        rows = frontal_rows(df)
+        n_cf = chexfound_frontal_count(df)
+        assert len(rows) == n_cf, f'{role}: anh thang theo khoa {len(rows)} != so dong CheXFound giu (Path khong chua lateral) {n_cf} -> DUNG'
+        idx = [r[0] for r in rows]
+        odd = {c: int(sum(label_value(v) == 'khac' for v in df[c].iloc[idx])) for c in labels}
+        assert not any(odd.values()), f'{role}: nhan co gia tri la {odd} -> DUNG'
+        d = pd.DataFrame(dict(khoa=[r[1] for r in rows], tach=SPLIT_OF_ROLE[role], nhom=[r[2] for r in rows]))
+        for c in labels:
+            d[c] = binarize(df[c].iloc[idx].tolist())
+        d['ap_pa'] = df['AP/PA'].iloc[idx].astype(str).tolist() if 'AP/PA' in df.columns else ''
+        d['nguon'] = role
+        parts_.append(d)
+        info[role] = dict(dong=int(len(df)), thang=len(rows), chexfound_giu=n_cf, nguoi=int(d.nhom.nunique()),
+                          gia_tri=dict((c, dict(collections.Counter(label_value(v) for v in df[c].iloc[idx]))) for c in labels))
+    t = pd.concat(parts_, ignore_index=True)
+    t = t.assign(_o=t.tach.map(ORDER)).sort_values(['_o', 'khoa'], kind='stable').drop(columns='_o').reset_index(drop=True)
+    return t, info
