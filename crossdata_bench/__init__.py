@@ -55,5 +55,10 @@ train_parallel thêm điểm bắt đầu / điểm lưu; chạy tiếp = chạy
 0.5.1 (25/11, kho CheXpert ĐO 3,5 ảnh / giây trên runtime CPU 2 nhân — CPU nghẽn; Tuấn "vậy bạn chỉnh đi"): store/build.threads_for (số luồng tải + chuyển ảnh =
 2 x CPU, 6..16; chỉ kho CheXpert); notebook/store_chexpert C4: phần đã ghi ở phiên này rồi ngắt giữa lúc tải lên -> chỉ tải lên tiếp (0.5.0: khối chuẩn chặn "ghi
 hai lần"); notebook/sessions: mã phiên lưu cả trong tệp GHI_LOC/.phien_93 (Restart session cùng máy = cùng phiên) + mở khoá MỘT LẦN bằng mã (MO_KHOA_PHIEN ở ô C2 =
-6 ký tự đầu mã phiên đang giữ khoá). Vòng học, bảng, kho, cách chấm không đổi."""
-__version__ = '0.5.1'
+6 ký tự đầu mã phiên đang giữ khoá). Vòng học, bảng, kho, cách chấm không đổi.
+0.5.2 (26/11, `C5` của 93v_chexpert_biomedclip / _evax trượt "chạy tiếp = chạy liền": đường học lệch 1,1e-2 / 1,9e-2 > 1e-3, dự đoán <= 8,1e-5; ô chẩn đoán
+`C5b` trên EVA-X: HAI lần chạy liền giống hệt nhau đã lệch 2,7e-2 — ở đầu dò lr ML-Decoder 0,1 / 0,05 đã hỏng — chạy tiếp 1,7e-2; ngưỡng 1e-3 đặt khi chưa đo
+nền nhiễu GPU; Tuấn "được dựng đi"): notebook/run C5 chạy liền HAI lần (A, B) -> nền nhiễu; luật resume_verdict: dự đoán + đường học của các ĐẦU ĐƯỢC CHỌN
+(chosen_keys) lệch <= max(1e-3, 3 x nền) so với A hoặc B cùng lựa chọn lr; đường học mọi đầu dò lr chỉ in kèm nền (không chặn). Vòng học, lưu giữa giai đoạn,
+bảng, kho, cách chấm không đổi."""
+__version__ = '0.5.2'
