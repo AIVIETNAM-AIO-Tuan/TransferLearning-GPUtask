@@ -46,6 +46,17 @@ def above(v):
     return '>0' if v[0] > 0 else '<0' if v[1] < 0 else 'chua 0'
 
 
+T_RE = r'\d{8}_\d{6}(?:_lan\d+)?'                    # dấu thời gian tên tệp (92g: chạy lại ô ghi trong cùng phiên -> hậu tố _lan<k>)
+
+
+def latest(d, folder_tag, stem, ext):
+    '''Tệp `<stem>_<t>.<ext>` MỚI NHẤT trong thư mục -> (t, bản) | (None, None).'''
+    rx = rf'{re.escape(stem)}_({T_RE})\.{ext}'
+    kk = d['kiem_ke'](folder_tag, mau=rx)[1]
+    ts = sorted((re.fullmatch(rx, n).group(1), n) for n in kk)
+    return (ts[-1][0], kk[ts[-1][1]][0]) if ts else (None, None)
+
+
 def load_caches(d, folder_tag, log=print):
     '''Bộ nhớ đệm 28 nhãn của lượt trước (tệp bo_dem_28_* MỚI NHẤT) + tệp resume (lượt đang dở) trong thư mục ghi của notebook -> {khoá: set_stats28}.'''
     kk = d['kiem_ke'](folder_tag, mau=rf"{re.escape(d['TEN_RESUME'])}|{CACHE_RE}")[1]
@@ -68,6 +79,14 @@ def save_resume(d, cache):
     def w(q):
         with open(q, 'wb') as fh:
             S.save_cache(fh, cache)
+    return d['luu_resume'](w)
+
+
+def save_resume_bytes(d, data):
+    '''Ghi đè MỘT tệp resume bằng nội dung bytes có sẵn (94c: dự đoán + chỉ mục).'''
+    def w(q):
+        with open(q, 'wb') as fh:
+            fh.write(data)
     return d['luu_resume'](w)
 
 

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Ô của notebook `94b_vindr28_it_nhan` (Colab CPU; PLAN_94 §4): chấm lại trên 28 nhãn dự đoán test ĐÃ LƯU (float16) của phép kiểm ít nhãn — 92b (s42, 8 hàng),
+"""Ô của notebook `94b_vindr28_it_nhan` (Colab CPU; PLAN_94 §4): chấm lại trên 28 nhãn dự đoán test của phép kiểm ít nhãn (0.2.0: bản FLOAT32 do 94c tính lại; không dùng tệp float16 của 92) — 92b (s42, 8 hàng),
 92e (4 backbone: 3 cặp CÓ / KHÔNG luồng vùng), 92g (s43: (3), (1b), (0)) — đặc trưng chính (TB token patch), k-NN + logistic ở 1 / 10 / 100 % nhãn. Họ phép so
 gọi lại ĐÚNG hàm của frozen_probe (scoring.family_pair / descriptive: họ 6 phép, max-T 95 %) trên ô 28 nhãn.
 
     C2 setup     khối Drive + phiên bản ba gói
     C3 load      nhãn VinDr của 92a (md5 = manifest, vân tay = các lượt 89) + dự đoán + JSON của 92b / 92e / 92g (bộ MỚI NHẤT có đủ cặp)
-    C4 score     set_stats28 mọi bộ (resume ~10 %); CỔNG: mAP21 + CI95 chấm lại từ dự đoán float16 so với JSON của 92 (lệch > 0,002 gắn cờ, > 0,01 dừng)
+    C4 score     set_stats28 mọi bộ (resume ~10 %); CỔNG: mAP21 + CI95 chấm lại so với JSON của 92 (lệch > 1e-9 gắn cờ, > 1e-4 dừng)
     C5 tables    Bảng 3 (ô VinDr, 28 nhãn): hàng x {k-NN, logistic} x {1, 10, 100 %}; TB 2 seed cho (0), (1b), (3); bốn backbone CÓ / KHÔNG
     C6 families  họ 6 phép (3) − (0) và (3) − (1b) ở từng seed; mô tả (X − (0), (3) − (2), ASG − ArrE); hiệu TB 2 seed; bốn cặp CÓ − KHÔNG (họ 6 mỗi cặp)
     C7 sync      JSON + CSV + bộ nhớ đệm -> dong_bo()
@@ -94,30 +94,28 @@ def load(ctx, log=print):
     rows = _rows()
     back = {v: k for k, v in FC.FRACTION_CODE.items()}
     src = {}
-    tre = r'\d{8}_\d{6}(?:_lan\d+)?'                                   # 92g: chạy lại C6 trong cùng phiên -> hậu tố _lan<k>
     for name, folder, prefix in C.SRC_92:
-        kk = d['kiem_ke'](folder, mau=rf'{re.escape(prefix)}_(du_doan_)?{tre}\.(json|npz)')[1]
-        ts = {}
-        for n in kk:
-            m = re.fullmatch(rf'{re.escape(prefix)}_(du_doan_)?({tre})\.(json|npz)', n)
-            if m and ((m.group(1) and m.group(3) == 'npz') or (not m.group(1) and m.group(3) == 'json')):
-                ts.setdefault(m.group(2), {})['npz' if m.group(1) else 'json'] = kk[n][0]
-        full = sorted(t for t, v in ts.items() if len(v) == 2)
-        assert full, f'{name}: chua co cap JSON + du doan trong {"/".join(folder)} -> DUNG'
-        t = full[-1]
-        js = json.load(open(d['tai'](ts[t]['json']), encoding='utf-8'))
+        t, ban = U.latest(d, folder, prefix, 'json')                     # JSON kết quả của 92 — CHỈ cho cổng
+        assert ban is not None, f'{name}: chua co JSON ket qua trong {"/".join(folder)} -> DUNG'
+        js = json.load(open(d['tai'](ban), encoding='utf-8'))
+        f94 = (C.FOLDER, C.RUN_TAGS[f'du_doan_{name}'])                 # 0.2.0: dự đoán float32 do 94c tính lại (KHÔNG dùng bản float16 của 92)
+        tp, bp = U.latest(d, f94, f'{C.PRED_FILE}_{name}', 'npz')
+        assert bp is not None, f"{name}: chua co du doan float32 cua 94c trong {'/'.join(f94)} -> chay {C.NOTEBOOKS[f'du_doan_{name}']} truoc. DUNG"
         preds = {}
-        with np.load(d['tai'](ts[t]['npz'])) as z:
+        with np.load(d['tai'](bp), allow_pickle=False) as z:
             for k in z.files:
+                if k == 'chi_muc':
+                    continue
                 row, feat, cfg, fc, dr = k.split('|')
                 if row in rows[name] and feat == FC.PRIMARY_FEATURE and cfg in FC.PROBES:
-                    v = z[k].astype(np.float32)
-                    assert v.shape == target.shape and np.isfinite(v).all(), f'{name} {k}: hinh {v.shape} / khong huu han -> DUNG'
+                    v = z[k]
+                    assert v.dtype == np.float32 and v.shape == target.shape and np.isfinite(v).all(), f'{name} {k}: {v.dtype} {v.shape} / khong huu han -> DUNG'
                     preds[(row, feat, cfg, back[fc], int(dr))] = v
         have = sorted({k[0] for k in preds})
         miss = [r for r in rows[name] if r not in have]
-        src[name] = dict(du_doan=preds, json=js, t=t, thu_muc='/'.join(folder))
-        log(f"  {name:<4} {'/'.join(folder)} @ {t}: {len(preds)} bo du doan chinh, {len(have)} hang" + (f' | THIEU hang {miss}' if miss else ''))
+        src[name] = dict(du_doan=preds, json=js, t=t, t_du_doan=tp, thu_muc='/'.join(f94))
+        log(f"  {name:<4} du doan float32 {'/'.join(f94)} @ {tp}: {len(preds)} bo, {len(have)} hang | JSON 92 {'/'.join(folder)} @ {t}"
+            + (f' | THIEU hang {miss}' if miss else ''))
     ctx.update(nhan=lab, target=target, nguon=src)
     return src
 
@@ -164,7 +162,7 @@ def score(ctx, log=print, workers=None):
     nrut = all(g['so_lan_rut'] == g['so_lan_rut_92'] for g in have)
     flag = [g for g in have if max(g['lech_diem'], g['lech_ci']) > C.FLAG_92]
     stop = [g for g in have if max(g['lech_diem'], g['lech_ci']) > C.STOP_92]
-    log(f"CONG so voi JSON cua 92 (mAP21 cham lai tu du doan float16): {len(have)} / {len(gate)} o co ban 92 | so lan rut nhan trung: {'DAT' if nrut else 'TRUOT'} | lech "
+    log(f"CONG so voi JSON cua 92 (mAP21 cham lai tu du doan float32 cua 94c): {len(have)} / {len(gate)} o co ban 92 | so lan rut nhan trung: {'DAT' if nrut else 'TRUOT'} | lech "
         f"lon nhat: so diem {worst['diem']:.1e}, can CI95 {worst['ci']:.1e} | > {C.FLAG_92:g}: {len(flag)} o (gan co) | > {C.STOP_92:g}: {len(stop)} o -> "
         + ('DAT' if have and nrut and not stop else 'TRUOT'))
     for g in flag[:6]:

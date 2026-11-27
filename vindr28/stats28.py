@@ -167,18 +167,20 @@ def stats_key(preds, target, cols, n_boot=C.N_BOOT, seed=C.BOOT_SEED, half_seed=
 
 
 ARRAYS = ('ap_b', 'ap_d', 'auroc', 'm21', 'm7')
+F32 = ('ap_b', 'ap_d', 'auroc')                       # 0.2.0: chỉ ba đại lượng 28 nhãn lưu float32; m21 / m7 (CHỈ cho cổng so với 89t / 92) giữ float64 — cổng
+                                                      # 1e-9 của 94b so CI21 dựng lại từ m21 với JSON 92 (float32 làm lệch ~1e-8)
 
 
 def stored(st):
-    '''Bản lưu được của set_stats28: mảng từng lần rút -> float32 (cùng một cách cho lần tính mới và lần nạp lại, nên kết quả không phụ thuộc resume).'''
-    return dict(st, **{k: np.asarray(st[k], dtype=np.float32).astype(np.float64) for k in ARRAYS})
+    '''Bản lưu được của set_stats28: ba đại lượng 28 nhãn -> float32 (cùng một cách cho lần tính mới và lần nạp lại, nên kết quả không phụ thuộc resume).'''
+    return dict(st, **{k: (np.asarray(st[k], dtype=np.float32).astype(np.float64) if k in F32 else np.asarray(st[k], dtype=np.float64)) for k in ARRAYS})
 
 
 def save_cache(fh, cache):
     '''{khoá: set_stats28 (+ 'cong')} -> .npz (KHÔNG pickle) vào tệp đã mở `fh` (np.savez với đường dẫn tự thêm đuôi .npz).'''
     keys = sorted(cache)
     meta = dict(v=VERSION, keys=keys, idx={k: {n: v for n, v in cache[k].items() if n not in ARRAYS} for k in keys})
-    arr = {f'{n}_{i}': np.asarray(cache[k][n], dtype=np.float32) for i, k in enumerate(keys) for n in ARRAYS}
+    arr = {f'{n}_{i}': np.asarray(cache[k][n], dtype=np.float32 if n in F32 else np.float64) for i, k in enumerate(keys) for n in ARRAYS}
     np.savez_compressed(fh, chi_muc=np.frombuffer(json.dumps(meta).encode('utf-8'), dtype=np.uint8), **arr)
 
 

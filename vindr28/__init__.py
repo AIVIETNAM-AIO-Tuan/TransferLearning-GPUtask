@@ -9,4 +9,4 @@ Chỉ CHẤM LẠI dự đoán test đã lưu của 89 (+ 86f) và 92 — không
     notebook     bench (94a: 89 + 86f) · it_nhan (94b: 92b / 92e / 92g)
 
 KHÔNG chứa ID Drive, email, mã ảnh."""
-__version__ = '0.1.0'
+__version__ = '0.2.0'         # 0.2.0 (27/11, Tuan 'tinh lai di'): 94c tinh lai du doan 92 o float32; 94b doc ban do

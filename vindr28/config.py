@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """Hằng số của module 94 (docs/PLAN_94_VINDR_28_NHAN.md). KHÔNG chứa ID Drive."""
 FOLDER = 'stage4_nb94'                                       # thư mục ghi của module 94 (dưới cxrlt_2024)
-RUN_TAGS = dict(bench='r94a_vindr28_benchmark', it_nhan='r94b_vindr28_it_nhan')
-NOTEBOOKS = dict(bench='94a_vindr28_benchmark', it_nhan='94b_vindr28_it_nhan')
+# 0.2.0 (Tuấn 27/11 "tính lại đi"): 94b đọc dự đoán float32 do 94c tính lại -> RUN_TAG mới (lượt float16 r94b_vindr28_it_nhan: Event 27/11, không dùng)
+RUN_TAGS = dict(bench='r94a_vindr28_benchmark', it_nhan='r94b_vindr28_it_nhan_f32',
+                du_doan_s42='r94c_du_doan_s42', du_doan_bb='r94c_du_doan_bb', du_doan_s43='r94c_du_doan_s43')
+NOTEBOOKS = dict(bench='94a_vindr28_benchmark', it_nhan='94b_vindr28_it_nhan',
+                 du_doan_s42='94c_du_doan_s42', du_doan_bb='94c_du_doan_bb', du_doan_s43='94c_du_doan_s43')
+PRED_FILE = 'du_doan_f32'                                    # 94c: tệp dự đoán float32 du_doan_f32_<nguồn>_<t>.npz (khoá như 92: hàng|đặc trưng|cấu hình|f<tỉ lệ>|lần rút)
 
 # ---- đại lượng (PLAN_94 §2) ----
 STATS = ('ap_b', 'ap_d', 'auroc')
@@ -16,17 +20,20 @@ CHUNK = 500                                                  # số lần rút m
 
 # ---- cổng ----
 TOL_89 = 1e-12                                               # 94a: mAP21 từng lần rút so với bộ nhớ đệm của 89t (cùng mã, cùng dữ liệu)
-FLAG_92, STOP_92 = 0.002, 0.01                               # 94b: lệch mAP21 / cận CI so với JSON của 92 (dự đoán float16): > FLAG gắn cờ, > STOP dừng
+FLAG_92, STOP_92 = 1e-9, 1e-4                                # 94c / 94b (0.2.0, dự đoán float32 tính lại): lệch mAP21 / cận CI so với JSON của 92: > FLAG gắn
+                                                             # cờ, > STOP dừng (lượt float16 cũ dùng 0,002 / 0,01)
 RESUME_EVERY = 0.10                                          # lưu tệp resume mỗi ~10 % số bộ dự đoán cần tính
 
 # ---- nguồn 89 (đọc) ----
 SRC_89T = ('stage4_nb89', 'r89t_tong_hop')                   # bộ nhớ đệm bootstrap của 89t (cổng)
 
-# ---- nguồn 92 (đọc): (tên, thư mục, tiền tố tệp) — hàng đọc theo config của frozen_probe ----
+# ---- nguồn 92 (đọc): (tên, thư mục JSON kết quả, tiền tố tệp, thư mục đặc trưng đã trích) — hàng đọc theo config của frozen_probe ----
 SRC_92 = (('s42', ('stage4_nb92', 'r92b_it_nhan_vindr'), 'it_nhan_vindr'),
           ('bb', ('stage4_nb92', 'r92e_it_nhan_vindr_bb'), 'it_nhan_vindr_bb'),
           ('s43', ('stage4_nb92', 'r92g_it_nhan_vindr_s43'), 'it_nhan_vindr_s43'))
-SRC_92A = ('stage4_nb92', 'r92a_trich_dac_trung_vindr')      # nhãn VinDr + manifest (vân tay = các lượt 89)
+SRC_TRICH = dict(s42=('stage4_nb92', 'r92a_trich_dac_trung_vindr'), bb=('stage4_nb92', 'r92d_trich_dac_trung_vindr_bb'),
+                 s43=('stage4_nb92', 'r92f_trich_dac_trung_vindr_s43'))
+SRC_92A = SRC_TRICH['s42']                                   # nhãn VinDr + manifest (vân tay = các lượt 89)
 
 # ---- đọc kết quả (PLAN_94 §3) ----
 READING = ('PHAN TICH SAU (PLAN_94 3): luat dat truoc cua 89 / 92 tinh tren 21 lop chinh; ban 28 nhan bao hieu + CI95 danh nghia + khoang DONG THOI max-T '
