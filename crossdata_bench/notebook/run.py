@@ -8,13 +8,17 @@ Mỗi hàm = một ô; trạng thái đi theo dict CTX; Drive qua khối chuẩn
     C5 smoke   chạy thử CẢ ba giai đoạn trên tập con (<= 512 / 256 / 256 ảnh) ở lô 256, đủ 4 loại đầu x 13 lr + cổng bộ nhớ GPU <= 70 % + phục hồi từ trạng
                thái resume; 0.5.0: + lượt 2 + 2 epoch chạy liền và chạy có BA lần ngắt (giữa mỗi giai đoạn; nạp lại qua torch.save / load như phiên mới)
                -> dự đoán val + test trùng (<= ROUNDTRIP_TOL); bỏ qua khi lượt đang resume. 0.5.2: HAI lần chạy liền (nền nhiễu GPU) — luật
-               resume_verdict: dự đoán + đường học của các ĐẦU ĐƯỢC CHỌN <= max(1e-3, 3 x nền); đường học mọi đầu dò lr chỉ in kèm nền
+               resume_verdict: dự đoán + đường học của các ĐẦU ĐƯỢC CHỌN <= max(1e-3, 3 x nền); đường học mọi đầu dò lr chỉ in kèm nền.
+               0.6.0 (= 0.5.3, Tuấn 27/11 "Gộp 0.5.3"): các lần chạy so sánh dưới heads_math (attention MATH ở đầu đọc, backbone giữ kernel) -> A, B
+               trùng TỪNG BIT thì chạy tiếp phải trùng TỪNG BIT; A, B vẫn lệch -> luật dự phòng của ô C5c (thêm C, D; gần một lần chạy liền hơn cặp xa nhất)
     C6 train   lượt thật (pipeline 89 nguyên văn, E = DatasetSpec.epochs); resume theo giai đoạn; 0.5.0: + lưu GIỮA giai đoạn ~30 phút (protocol/resume) + xoá
                phiên bản cũ của tệp resume + in tốc độ đo / giờ còn lại; dự đoán test MỘT lần
     C7 report  val cuối pha 1 + test: TB 5 hạt ± SD, ensemble, hai nửa theo cụm — CHỈ MÔ TẢ (khoảng tin cậy + luật: 93t); lỗi ở đây không làm mất C6
     C8 sync    dong_bo() + kiểm tệp trên Drive
 0.5.0 (CheXpert (A), nhiều phiên): C2 chặn hai phiên cùng chạy một lượt (notebook/sessions); C3 nạp kho chia phần (datasets/base) — quota tải của một phần
-hết -> tải bản sao phía máy chủ."""
+hết -> tải bản sao phía máy chủ.
+0.6.0 (Tuấn 27/11, PLAN_93 §13): C2 nhận hàng thêm (config.EXTRA_ROWS = ASG) ngoài 9 hàng."""
+import contextlib
 import dataclasses
 import json
 import os
@@ -38,8 +42,12 @@ RESUME_STOPS = (('s1', 1), ('s2', 1), ('s3', 1))   # chạy thử chạy tiếp:
 # Lượt chạy tiếp của C5: 2 epoch mỗi giai đoạn -> sau mỗi lần ngắt còn >= 3 bước (với 1 epoch chỉ còn 1 bước: bước đó dùng lr đã nạp qua optimizer, lịch lr
 # nạp sai chỉ lộ từ bước SAU — đột biến R3 25/11 không bị bắt khi 1 epoch)
 RESUME_RUN = dict(epochs_phase1=2, epochs_phase2=2, n_seeds=2)
-# 0.5.2: ngưỡng "chạy tiếp = chạy liền" = max(ROUNDTRIP_TOL, NOISE_FACTOR x nền nhiễu GPU đo bằng hai lần chạy liền giống hệt nhau trong chính C5)
-NOISE_FACTOR = 3.0
+# 0.6.0 (= 0.5.3 đề xuất 26/11; Tuấn 27/11 "Gộp 0.5.3"): luật "chạy tiếp = chạy liền" của C5. Đo 26/11 (Event "ô `C5d` (CheXWorld)"): với attention SDPA
+# kiểu MATH hai lần chạy liền trùng TỪNG BIT (24 / 24 mảng, mọi đầu); lệch của 0.5.2 đến từ kernel attention hợp nhất (nền đo bằng MỘT cặp báo sai — nhiễu
+# có hai nhánh, ô C5c). Các lần chạy so sánh chạy dưới heads_math (MATH chỉ ở đầu đọc; backbone giữ đúng kernel của lượt thật) -> so TỪNG BIT; hai lần chạy
+# liền vẫn lệch (nguồn không tất định khác) -> thêm EXTRA_REFS rồi áp luật dự phòng của ô C5c. Lượt thật (C6) KHÔNG đổi kernel.
+EXTRA_REFS = ('C', 'D')
+SDP_FLAGS = ('flash', 'mem_efficient', 'math', 'cudnn')     # cờ toàn cục torch.backends.cuda.<cờ>_sdp_enabled / enable_<cờ>_sdp (có thì dùng)
 
 
 def run_tag(name, encoder):
@@ -96,7 +104,8 @@ def setup(name, encoder, ns, log=print):
     from vindr_bench.protocols.ours import gates as G
     from vindr_bench.protocols.ours import runtime as RT
     sp = config.dataset(name)
-    assert encoder in config.RUN_ORDER and encoder in BUILT, f'{encoder}: khong thuoc 9 hang cua 93 {config.RUN_ORDER} -> DUNG'
+    rows = config.RUN_ORDER + config.EXTRA_ROWS                     # 0.6.0: + hàng thêm (ASG, PLAN_93 §13) — họ phép so riêng ở 93t
+    assert encoder in rows and encoder in BUILT, f'{encoder}: khong thuoc 9 hang cua 93 {config.RUN_ORDER} / hang them {config.EXTRA_ROWS} -> DUNG'
     drive = ver2.drive_api(ns)
     assert drive['RUN_TAG'] == run_tag(name, encoder), f"RUN_TAG {drive['RUN_TAG']!r} != {run_tag(name, encoder)!r} -> DUNG"
     mt = E.install_notebook_packages(min_free_gb=MIN_FREE_GB)
@@ -226,18 +235,70 @@ def compare_runs(res_x, arr_x, res_y, arr_y):
     return out
 
 
-def resume_verdict(hits, n_stops, refs, got, tol=ROUNDTRIP_TOL, factor=NOISE_FACTOR):
-    '''(0.5.2) Luật đạt "chạy tiếp = chạy liền" của C5. refs = {'A': (result, arrays), 'B': (result, arrays)}: HAI lần chạy liền giống hệt nhau; got = (result,
-       arrays) của lần chạy tiếp (có ngắt). Nền nhiễu GPU = lệch A–B (đo trong chính lượt; CPU: 0). Ngưỡng = max(tol, factor x nền) cho dự đoán và cho đường
-       học của các đầu được chọn (nền không đo được vì A, B khác lựa chọn -> tol). Đạt: đủ lần ngắt + lần chạy tiếp CÙNG lựa chọn lr với A hoặc B và lệch
-       <= ngưỡng so với lần đó. Đường học của MỌI đầu dò lr chỉ in kèm nền, KHÔNG chặn: 26/11 (`C5b` EVA-X) hai lần chạy liền lệch 2,7e-2 ở đầu ML-Decoder
-       lr 0,1 / 0,05 đã hỏng (AUC 0,45–0,50), các đầu được chọn <= 1,5e-4 (Event 2026-11-26).'''
-    (ra, aa), (rb, ab) = refs['A'], refs['B']
-    nen = compare_runs(ra, aa, rb, ab)
-    lim = {f: (max(tol, factor * nen[f]) if not nen['chon_khac'] and np.isfinite(nen[f]) else tol) for f in ('du_doan', 'dau_chon')}
-    so = {n: compare_runs(r, a, *got) for n, (r, a) in refs.items()}
-    match = [n for n, s in so.items() if not s['chon_khac'] and s['du_doan'] <= lim['du_doan'] and s['dau_chon'] <= lim['dau_chon']]
-    return dict(dat=hits == n_stops and bool(match), khop=match, nen=nen, so=so, nguong=lim, so_lan_ngat=hits, he_so=factor)
+@contextlib.contextmanager
+def heads_math(backbone):
+    '''(0.6.0) Trong khối: attention SDPA chỉ dùng kernel MATH (tất định) — trừ lúc gọi backbone.features: khi đó bật lại ĐÚNG các kernel đang bật lúc vào
+       khối (backbone chạy như lượt thật). Ra khối (kể cả khi lỗi): trả cờ, trả backbone.features. Chỉ dùng cho các lần chạy so sánh của C5; C6 không đổi.
+       -> cờ lúc vào khối.'''
+    import torch
+    B = torch.backends.cuda
+    flags = [f for f in SDP_FLAGS if hasattr(B, f'{f}_sdp_enabled') and hasattr(B, f'enable_{f}_sdp')]
+    assert 'math' in flags, 'torch khong co co SDPA math -> DUNG'
+    saved = {f: bool(getattr(B, f'{f}_sdp_enabled')()) for f in flags}
+    only_math = {f: f == 'math' for f in flags}
+
+    def apply(st):
+        for f, v in st.items():
+            getattr(B, f'enable_{f}_sdp')(v)
+    had = 'features' in vars(backbone)
+    orig = backbone.features
+
+    def features(*a, **kw):
+        apply(saved)
+        try:
+            return orig(*a, **kw)
+        finally:
+            apply(only_math)
+    backbone.features = features
+    apply(only_math)
+    try:
+        yield dict(saved)
+    finally:
+        apply(saved)
+        if had:
+            backbone.features = orig
+        else:
+            del backbone.features
+
+
+def resume_verdict(hits, n_stops, refs, got):
+    '''(0.6.0) Luật đạt "chạy tiếp = chạy liền" của C5 — mọi lần chạy dưới heads_math. refs = {tên: (result, arrays)}: các lần chạy liền giống hệt nhau
+       (A, B; dự phòng thêm EXTRA_REFS); got = (result, arrays) của lần chạy tiếp (có ngắt). Mọi chế độ: đủ số lần ngắt.
+       - 'tung_bit': A, B trùng TỪNG BIT (cùng lr chọn; dự đoán, đường học đầu được chọn, đường học MỌI đầu dò lr) -> chạy tiếp phải trùng A TỪNG BIT.
+       - 'nhieu': A, B lệch -> cần đủ 2 + len(EXTRA_REFS) lần chạy liền (thiếu -> can_them = True, chưa phán) -> luật của ô C5c (26/11): chạy tiếp CÙNG lr
+         chọn với ít nhất một lần chạy liền, và lệch tới lần chạy liền gần nhất (cùng lr chọn) <= lệch lớn nhất giữa các cặp chạy liền (cùng lr chọn) — cho
+         cả dự đoán lẫn đường học đầu được chọn.'''
+    names = sorted(refs)
+    assert len(names) >= 2, 'can it nhat HAI lan chay lien -> DUNG'
+    pairs = {(x, y): compare_runs(*refs[x], *refs[y]) for i, x in enumerate(names) for y in names[i + 1:]}
+    so = {n: compare_runs(*refs[n], *got) for n in names}
+    a, b = names[0], names[1]
+    nen = pairs[(a, b)]
+    out = dict(so_lan_ngat=hits, nen=nen, so=so, cap={f'{x}-{y}': v for (x, y), v in pairs.items()}, so_lan_lien=len(names))
+    if not nen['chon_khac'] and nen['du_doan'] == 0 and nen['dau_chon'] == 0 and nen['do_lr'] == 0:
+        s = so[a]
+        dat = hits == n_stops and not s['chon_khac'] and s['du_doan'] == 0 and s['dau_chon'] == 0 and s['do_lr'] == 0
+        return dict(out, che_do='tung_bit', dat=dat, can_them=False, khop=[a] if dat else [], nguong=dict(du_doan=0.0, dau_chon=0.0, do_lr=0.0))
+    if len(names) < 2 + len(EXTRA_REFS):
+        return dict(out, che_do='nhieu', dat=False, can_them=True, khop=[], nguong=None)
+    lim = {}
+    for f in ('du_doan', 'dau_chon'):
+        v = [p[f] for p in pairs.values() if not p['chon_khac'] and np.isfinite(p[f])]
+        lim[f] = max(v) if v else None
+    near = {f: min((so[n][f] for n in names if not so[n]['chon_khac'] and np.isfinite(so[n][f])), default=float('inf')) for f in ('du_doan', 'dau_chon')}
+    khop = [n for n in names if not so[n]['chon_khac']]
+    dat = hits == n_stops and bool(khop) and all(lim[f] is not None and near[f] <= lim[f] for f in lim)
+    return dict(out, che_do='nhieu', dat=dat, can_them=False, khop=khop, nguong=lim, gan_nhat=near)
 
 
 def resume_equal(sd, backbone, name, run_cfg, subset, ref_arrays, stops=RESUME_STOPS, log=None, protocol=None, out=None):
@@ -282,13 +343,18 @@ def _gaps(s):
 
 
 def _resume_line(ver, minutes):
-    '''Dòng in của "chạy tiếp = chạy liền" (0.5.2): nền A–B, chạy tiếp so với A / B, ngưỡng, kết luận.'''
-    lim = ver['nguong']
-    return (f"  chay tiep = chay lien ({RESUME_RUN['epochs_phase1']} + {RESUME_RUN['epochs_phase2']} epoch): {ver['so_lan_ngat']} lan ngat "
-            f"({', '.join(f'{g} buoc {b}' for g, b in RESUME_STOPS)}; nap lai qua torch.save / load nhu phien moi) | NEN nhieu GPU (chay lien A vs B): "
-            f"{_gaps(ver['nen'])} | chay tiep vs A: {_gaps(ver['so']['A'])} | vs B: {_gaps(ver['so']['B'])} | nguong du doan {lim['du_doan']:.1e}, dau duoc "
-            f"chon {lim['dau_chon']:.1e} (= max({ROUNDTRIP_TOL:g}, {ver['he_so']:g} x nen); duong hoc moi dau do lr: chi in, khong chan) | "
-            f"{'DAT (khop ' + ' + '.join(ver['khop']) + ')' if ver['dat'] else 'TRUOT'} | {minutes:.1f} phut")
+    '''Dòng in của "chạy tiếp = chạy liền" (0.6.0): chế độ, so với lần chạy liền, kết luận.'''
+    head = (f"  chay tiep = chay lien ({RESUME_RUN['epochs_phase1']} + {RESUME_RUN['epochs_phase2']} epoch; attention MATH o dau doc, backbone giu kernel cua "
+            f"luot that): {ver['so_lan_ngat']} lan ngat ({', '.join(f'{g} buoc {b}' for g, b in RESUME_STOPS)}; nap lai qua torch.save / load nhu phien moi) | ")
+    if ver['che_do'] == 'tung_bit':
+        body = f"hai lan chay lien A, B TRUNG TUNG BIT -> chay tiep vs A (phai = 0): {_gaps(ver['so'][sorted(ver['so'])[0]])}"
+    else:
+        lim, near = ver.get('nguong') or {}, ver.get('gan_nhat') or {}
+        body = (f"{ver['so_lan_lien']} lan chay lien, A vs B KHONG trung tung bit ({_gaps(ver['nen'])}) -> luat du phong (o C5c): chay tiep vs lan chay lien "
+                f"gan nhat cung lr chon: du doan {near.get('du_doan', float('nan')):.1e}, dau duoc chon {near.get('dau_chon', float('nan')):.1e} | lech lon "
+                f"nhat giua cac cap chay lien: " + (f"du doan {lim['du_doan']:.1e}, dau duoc chon {lim['dau_chon']:.1e}"
+                                                     if lim and all(v is not None for v in lim.values()) else 'KHONG co cap so duoc'))
+    return head + body + f" | {'DAT' if ver['dat'] else 'TRUOT'} | {minutes:.1f} phut"
 
 
 def smoke(ctx, log=print):
@@ -311,14 +377,21 @@ def smoke(ctx, log=print):
     total = torch.cuda.get_device_properties(0).total_memory if ctx['device'] == 'cuda' else 0
     lech = R.roundtrip_check(pl, state, arrays)
     tests = [k for k in arrays if k.startswith('test_')]
-    t1 = time.time()                       # 0.5.0: chạy tiếp (ngắt giữa mỗi giai đoạn) = chạy liền; 0.5.2: HAI lần chạy liền A, B -> nền nhiễu GPU
+    t1 = time.time()                       # 0.5.0: chạy tiếp (ngắt giữa mỗi giai đoạn) = chạy liền; 0.6.0: mọi lần chạy so sánh dưới heads_math -> từng bit
     run_ct = C.MainRun(**RESUME_RUN)
-    refs = {n: R.run(R.prepare(sd, ctx['backbone'], ctx['bo'], main=run_ct, subset=sub), state={}, save=None, run_tag=f'chay_thu_lien_{n}', log=lambda s='': None)
-            for n in ('A', 'B')}
-    info_ct = {}
-    _, hits, _ = resume_equal(sd, ctx['backbone'], ctx['bo'], run_ct, sub, refs['A'][1], out=info_ct)
-    ver = resume_verdict(hits, len(RESUME_STOPS), refs, (info_ct['ket_qua'], info_ct['mang']))
-    del refs, info_ct
+
+    def lien(n):
+        return R.run(R.prepare(sd, ctx['backbone'], ctx['bo'], main=run_ct, subset=sub), state={}, save=None, run_tag=f'chay_thu_lien_{n}', log=lambda s='': None)
+    with heads_math(ctx['backbone']):
+        refs = {n: lien(n) for n in ('A', 'B')}
+        info_ct = {}
+        _, hits, _ = resume_equal(sd, ctx['backbone'], ctx['bo'], run_ct, sub, refs['A'][1], out=info_ct)
+        got = (info_ct['ket_qua'], info_ct['mang'])
+        ver = resume_verdict(hits, len(RESUME_STOPS), refs, got)
+        if ver['can_them']:                 # A, B lệch dù đầu đọc MATH -> luật dự phòng (thêm hai lần chạy liền)
+            refs.update({n: lien(n) for n in EXTRA_REFS})
+            ver = resume_verdict(hits, len(RESUME_STOPS), refs, got)
+    del refs, info_ct, got
     ck = dict(so_buoc=result['kiem']['so_buoc_dung'], huu_han=result['kiem']['du_doan_huu_han'],
               bo_nho=(ctx['device'] != 'cuda' or G.memory_ok(peak, total)), phuc_hoi=lech <= ROUNDTRIP_TOL,
               du_dau=len(tests) >= len(C.HEAD_KINDS) * run.n_seeds and all(arrays[k].shape == (sub['test'], len(sd.label_names)) for k in tests),

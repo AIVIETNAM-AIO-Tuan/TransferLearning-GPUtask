@@ -32,8 +32,11 @@ def heads():
     return C.HEAD_KINDS, C.TITLES
 
 
-def encoders(bo):
-    return [e for e in config.TABLE_ORDER if any(k[0] == e for k in bo['cells'])]
+def encoders(bo, locked=False):
+    '''Hàng có ô trong bộ, theo thứ tự bảng. locked=True: chỉ 9 hàng đã khoá (TABLE_ORDER — thứ hạng, điều khoản trần, họ 32 phép); mặc định (0.6.0): + hàng
+       thêm (ASG) ở cuối — bảng / hình.'''
+    rows = config.TABLE_ORDER if locked else config.ALL_ROWS
+    return [e for e in rows if any(k[0] == e for k in bo['cells'])]
 
 
 def row_text(e):
@@ -113,15 +116,26 @@ def long_table(bo, log=print):
 
 
 def ranks(bo, log=print):
-    '''Thứ hạng theo AP (số của luật) ở từng đầu. -> {đầu: [encoder theo thứ tự]}.'''
+    '''Thứ hạng theo AP (số của luật) ở từng đầu, trên 9 hàng đã khoá (như đã báo). -> {đầu: [encoder theo thứ tự]}; 0.6.0: vị trí của hàng thêm (ASG) nếu xếp
+       chung in thêm + ghi ở khoá 'hang_them' (MÔ TẢ).'''
     hk, ht = heads()
-    out = {}
-    log('\n--- THU HANG theo AP test (TB 5 hat; MO TA — thu hang khong phai phep so) ---')
+    out, extra = {}, {}
+    log('\n--- THU HANG theo AP test (TB 5 hat; MO TA — thu hang khong phai phep so; 9 hang da khoa) ---')
     for h in hk:
-        v = {e: bo['cells'][(e, h, 'luat')]['diem']['ap'] for e in encoders(bo) if (e, h, 'luat') in bo['cells']}
+        v = {e: bo['cells'][(e, h, 'luat')]['diem']['ap'] for e in encoders(bo, locked=True) if (e, h, 'luat') in bo['cells']}
         order = sorted(v, key=lambda e: -v[e])
         out[h] = order
         log(f"{ht[h]:<11}" + ' > '.join(f'{config.ROW_TITLES[e]} {f3(v[e])}' for e in order))
+        for x in config.EXTRA_ROWS:
+            c = bo['cells'].get((x, h, 'luat'))
+            if c is not None:
+                k = 1 + sum(1 for e in order if v[e] > c['diem']['ap'])
+                extra.setdefault(x, {})[h] = dict(ap=c['diem']['ap'], hang_neu_xep_chung=k, so_hang=len(order) + 1)
+    for x, per in extra.items():
+        log(f"hang them {config.ROW_TITLES[x]} (MO TA, ngoai thu hang tren): " + ' | '.join(f"{ht[h]} {f3(p['ap'])} (thu {p['hang_neu_xep_chung']} / "
+                                                                                     f"{p['so_hang']} neu xep chung)" for h, p in per.items()))
+    if extra:
+        out['hang_them'] = extra
     return out
 
 

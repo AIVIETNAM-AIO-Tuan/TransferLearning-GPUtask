@@ -33,7 +33,7 @@ def _heads():
 
 def order(bo):
     '''Thứ tự hàng dùng chung cho mọi hình của một bộ: AP (số của luật) cao nhất qua 4 đầu, giảm dần.'''
-    encs = [e for e in config.TABLE_ORDER if any(k[0] == e and k[2] == 'luat' for k in bo['cells'])]
+    encs = [e for e in config.ALL_ROWS if any(k[0] == e and k[2] == 'luat' for k in bo['cells'])]       # 0.6.0: + hàng thêm (ASG)
     best = {e: max(c['diem']['ap'] for k, c in bo['cells'].items() if k[0] == e and k[2] == 'luat') for e in encs}
     return sorted(encs, key=lambda e: -best[e])
 
@@ -111,12 +111,13 @@ def heat3(bo, note=None):
     return fig
 
 
-def family(bo, fam, note=None):
+def family(bo, fam, note=None, rule='PLAN_93 §5', name='B − X', desc_text='MÔ TẢ — điều khoản trần (đối chứng tốt nhất ≥ 0,98): không phán quyết'):
+    '''0.6.0: hàng = các đối chứng CÓ trong họ (họ 32 phép: 8 hàng như cũ; họ riêng: ASG); rule / name / desc_text cho tiêu đề + chú giải.'''
     from matplotlib.lines import Line2D
     FG = _fg()
     plt = FG._plt()
     hk, ht = _heads()
-    rows = [x for x in order(bo) if x != config.REFERENCE]
+    rows = [x for x in order(bo) if x != config.REFERENCE and any(r['doi_chung'] == x for r in fam['phep_so'])]
     items = {(r['doi_chung'], r['dau']): r for r in fam['phep_so']}
     if not items:
         return None
@@ -153,13 +154,13 @@ def family(bo, fam, note=None):
     bar = Line2D([], [], color=FG.ONE_HUE, linewidth=2.0)
     if decide:
         legend = ([full, hollow, bar], ['đạt luật (B hơn / B kém)', 'không phân biệt', f'khoảng đồng thời 95 % (max-T, q = {fam["q"]:.2f})'])
-        head = f'Họ {fam["so_phep"]} phép B − X trên test {_title(bo)} — luật PLAN_93 §5'
+        head = f'Họ {fam["so_phep"]} phép {name} trên test {_title(bo)} — luật {rule}'
     elif fam['mo_ta'] and fam['du']:
-        legend = ([hollow, bar], ['MÔ TẢ — điều khoản trần (đối chứng tốt nhất ≥ 0,98): không phán quyết', f'khoảng đồng thời 95 % (max-T, q = {fam["q"]:.2f})'])
-        head = f'Họ {fam["so_phep"]} phép B − X trên test {_title(bo)} — CHỈ MÔ TẢ (điều khoản trần)'
+        legend = ([hollow, bar], [desc_text, f'khoảng đồng thời 95 % (max-T, q = {fam["q"]:.2f})'])
+        head = f'Họ {fam["so_phep"]} phép {name} trên test {_title(bo)} — CHỈ MÔ TẢ'
     else:
         legend = ([hollow, bar], ['họ chưa đủ: chưa áp luật', 'CI95 danh nghĩa'])
-        head = f'B − X trên test {_title(bo)} — họ chưa đủ ({fam["co"]} / {fam["so_phep"]} phép)'
+        head = f'{name} trên test {_title(bo)} — họ chưa đủ ({fam["co"]} / {fam["so_phep"]} phép)'
     FG._layout(fig, head, note, legend=legend)
     return fig
 

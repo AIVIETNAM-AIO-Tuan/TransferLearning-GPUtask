@@ -60,5 +60,10 @@ hai lần"); notebook/sessions: mã phiên lưu cả trong tệp GHI_LOC/.phien_
 `C5b` trên EVA-X: HAI lần chạy liền giống hệt nhau đã lệch 2,7e-2 — ở đầu dò lr ML-Decoder 0,1 / 0,05 đã hỏng — chạy tiếp 1,7e-2; ngưỡng 1e-3 đặt khi chưa đo
 nền nhiễu GPU; Tuấn "được dựng đi"): notebook/run C5 chạy liền HAI lần (A, B) -> nền nhiễu; luật resume_verdict: dự đoán + đường học của các ĐẦU ĐƯỢC CHỌN
 (chosen_keys) lệch <= max(1e-3, 3 x nền) so với A hoặc B cùng lựa chọn lr; đường học mọi đầu dò lr chỉ in kèm nền (không chặn). Vòng học, lưu giữa giai đoạn,
-bảng, kho, cách chấm không đổi."""
-__version__ = '0.5.2'
+bảng, kho, cách chấm không đổi.
+0.6.0 (27/11, Tuấn: thêm hàng ASG trên cả 4 bộ — PLAN_93 §13; ô C5: "Gộp 0.5.3"): config.EXTRA_ROWS = ('asg',) + ALL_ROWS (RUN_ORDER / TABLE_ORDER / họ 32
+phép B − X / điều khoản trần của §5 không đổi); notebook/run C2 nhận hàng thêm; C5 (= 0.5.3): các lần chạy so sánh dưới heads_math (attention SDPA MATH ở đầu
+đọc, backbone giữ kernel của lượt thật) -> A, B trùng TỪNG BIT thì chạy tiếp phải trùng TỪNG BIT; A, B vẫn lệch -> thêm hai lần chạy liền, luật dự phòng của
+ô C5c (gần một lần chạy liền cùng lr chọn hơn cặp chạy liền xa nhất); 93t: ASG vào bảng + hình, họ RIÊNG B − ASG (4 phép mỗi bộ, max-T riêng). Vòng học (C6),
+lưu giữa giai đoạn, kho, cách chấm của 9 hàng không đổi."""
+__version__ = '0.6.0'

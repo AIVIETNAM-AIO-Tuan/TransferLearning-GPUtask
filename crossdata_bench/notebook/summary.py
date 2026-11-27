@@ -8,7 +8,8 @@ Chạy được khi mới có một phần kết quả: lượt thiếu được
                       cổng: bootstrap trọng số 1 = điểm
     Phần của mỗi bộ (RSNA: C5–C7; Shenzhen: C8–C10):
         tables(bộ)    điều kiện + val cuối pha 1 (theo dõi) + ma trận test 3 số đo + bảng dài đủ điều kiện từng hàng + thứ hạng + cờ biên lưới
-        rule(bộ)      điều khoản trần + họ 32 phép B − X (khoảng đồng thời max-T, phán quyết) + hiệu mô tả (giữa đầu đọc; nhánh theo AP − luật)
+        rule(bộ)      điều khoản trần + họ 32 phép B − X (khoảng đồng thời max-T, phán quyết) + hiệu mô tả (giữa đầu đọc; nhánh theo AP − luật);
+                      0.6.0: + họ RIÊNG B − ASG (hàng thêm, PLAN_93 §13: 4 phép mỗi bộ, max-T riêng; điều khoản trần + họ 32 phép tính trên 9 hàng như cũ)
         figures(bộ)   8 hình: chấm + CI (AP / AUPRC / AUROC), lưới encoder × đầu, họ B − X, hiệu B − X (3 số đo), đường dò lr (AUROC / AP val)
     C11 side_by_side  đặt cạnh thứ hạng giữa các bộ (+ VinDr của 89t Ver2 kho đệm vuông không cân bằng nếu đọc được) — MÔ TẢ
     C12 sync          ghi JSON + CSV + PNG (tên tệp mang tên bộ) rồi dong_bo()"""
@@ -57,11 +58,12 @@ def collect(ctx, names=NAMES, log=print):
     '''C3. -> {bộ: Bundle}.'''
     t0 = time.time()
     log('--- kiem ke + tai cac luot 93v (moi bo) ---')
-    dl = SC.collect(ctx['drive'], names, log=log)
+    dl = SC.collect(ctx['drive'], names, encoders=config.ALL_ROWS, log=log)          # 0.6.0: + hàng thêm (ASG); thiếu -> chỉ liệt kê
     ctx['dl'] = dl
     for name, bd in dl.items():
         commits = sorted({r['goi_93'] or '?' for r in bd.runs.values()})
-        log(f"{name}: {len(bd.runs)} / {len(config.TABLE_ORDER)} luot, {len(bd.sets)} bo du doan (moi bo = mot hat cua mot nhanh) | crossdata_bench cua luot: "
+        log(f"{name}: {len(bd.runs)} / {len(config.ALL_ROWS)} luot ({len(config.TABLE_ORDER)} hang + hang them {list(config.EXTRA_ROWS)}), {len(bd.sets)} bo du doan "
+            f"(moi bo = mot hat cua mot nhanh) | crossdata_bench cua luot: "
             f"{[c[:12] for c in commits]} | nhan / thu tu anh / ma cum test giong nhau o moi luot: DAT")
         for m in bd.missing:
             log(f'  ! {m}')
@@ -156,10 +158,11 @@ def rule(ctx, name, log=print):
     sp = config.dataset(name)
     hk = T.heads()[0]
     encs = T.encoders(bo)
+    locked = T.encoders(bo, locked=True)                  # 0.6.0: điều khoản trần + họ 32 phép CHỈ trên 9 hàng đã khoá (hàng thêm không vào)
     comps = [e for e in config.TABLE_ORDER if e != config.REFERENCE]
     log(f"=== {sp.title}: HO {len(comps) * len(hk)} phep {config.ROW_TITLES[config.REFERENCE]} - X (luat PLAN_93 5; so cua luat = AP bac thang; 'B hon' = hieu "
         f">= +{config.RULE_DELTA} VA can duoi DONG THOI > 0 VA hieu > 0 o CA HAI nua test; 'B kem' doi xung) ===")
-    tr = BS.ceiling(bo['cells'], config.REFERENCE, encs, hk)
+    tr = BS.ceiling(bo['cells'], config.REFERENCE, locked, hk)
     T.ceiling_text(tr, log)
     descriptive = tr['ap_dung'] or not sp.in_rule
     if not sp.in_rule:
@@ -178,6 +181,29 @@ def rule(ctx, name, log=print):
                                             hieu=BS.pairwise(c[(e, h, 'ap')], c[(e, h, 'luat')])))
     T.descriptive_tables(bo, out, log)
     bo.update(tran=tr, ho=fam, ho_bang=rows, mo_ta=out)
+    _extra_family(bo, sp, hk, descriptive, log)
+    return fam
+
+
+def _extra_family(bo, sp, hk, descriptive, log=print):
+    '''0.6.0 (PLAN_93 §13, đặt 27/11 TRƯỚC mọi kết quả ASG ở bộ ngoài): họ RIÊNG B − hàng thêm (ASG) × 4 đầu, max-T riêng, cùng dạng luật §5. Mô tả khi: điều
+       khoản trần của §5 kích hoạt ở bộ (tính trên 8 đối chứng), hoặc hàng thêm tự đạt >= CEILING ở số của luật ở đầu nào đó, hoặc bộ ngoài luật (JSRT).'''
+    c, ref = bo['cells'], config.REFERENCE
+    extra = [x for x in config.EXTRA_ROWS if any(k[0] == x and k[2] == 'luat' for k in c)]
+    if not extra:
+        log(f"\n=== HO RIENG B - hang them {list(config.EXTRA_ROWS)} (PLAN_93 13): chua co luot hang them o bo nay -> chua co ===")
+        bo.pop('ho_them', None)
+        bo.pop('ho_them_bang', None)
+        return None
+    best = max(c[(x, h, 'luat')]['diem'][BS.RULE_METRIC] for x in extra for h in hk if (x, h, 'luat') in c)
+    why = [w for w, on in (('dieu khoan tran cua bo (8 doi chung)', bool((bo.get('tran') or {}).get('ap_dung'))),
+                           (f'hang them dat >= {config.CEILING} ({best:.4f})', best >= config.CEILING), ('bo ngoai luat', not sp.in_rule)) if on]
+    log(f"\n=== {sp.title}: HO RIENG {len(extra) * len(hk)} phep {config.ROW_TITLES[ref]} - {', '.join(config.ROW_TITLES[x] for x in extra)} (hang them; luat PLAN_93 13 "
+        f"dat 27/11 TRUOC moi ket qua ASG o bo ngoai; KHONG thuoc ho {len([e for e in config.TABLE_ORDER if e != ref]) * len(hk)} phep tren; so HAI HE THONG — khac "
+        f"khoi tao, anh 224 so voi 518, muc tieu), khoang DONG THOI max-T rieng ===" + (f" | MO TA: {'; '.join(why)}" if why else ''))
+    fam = BS.family(c, ref, extra, hk, descriptive=bool(why))
+    rows = T.family_table(bo, fam, log)
+    bo.update(ho_them=dict(fam, hang_them=extra, ly_do_mo_ta=why), ho_them_bang=rows)
     return fam
 
 
@@ -210,6 +236,13 @@ def figures(ctx, name, log=print, show=True):
     f = FG3.family(bo, bo['ho'], note + ' Vạch = khoảng đồng thời 95 % (max-T) của cả họ; đường đứt = ±0,01 (ngưỡng của luật).')
     if f is not None:
         figs['ho_b_tru_x'] = f
+    if bo.get('ho_them'):                                   # 0.6.0: họ riêng B − ASG (PLAN_93 §13)
+        why = bo['ho_them'].get('ly_do_mo_ta') or []
+        f = FG3.family(bo, bo['ho_them'], note + ' Họ RIÊNG (hàng thêm, đặt 27/11 trước kết quả): khoảng đồng thời 95 % (max-T) tính riêng trong họ này; đường đứt '
+                       '= ±0,01.', rule='PLAN_93 §13', name='B − ' + ', '.join(config.ROW_TITLES[x] for x in bo['ho_them']['hang_them']),
+                       desc_text='MÔ TẢ — ' + ('; '.join(why) if why else 'không phán quyết'))
+        if f is not None:
+            figs['ho_b_tru_hang_them'] = f
     f = FG3.diff_heat(bo, note)
     if f is not None:
         figs['hieu_b_tru_x_3_so_do'] = f
@@ -240,7 +273,7 @@ def _vindr(ctx, log):
     with open(d['tai'](kk[name][0]), encoding='utf-8') as f:
         o = json.load(f).get('o') or {}
     hk = T.heads()[0]
-    ap = {(e, h): float(o[k]['diem'][v['panel']]['ap']) for e in config.TABLE_ORDER for h in hk for k in [v['cell'].format(enc=e, head=h)] if k in o}
+    ap = {(e, h): float(o[k]['diem'][v['panel']]['ap']) for e in config.ALL_ROWS for h in hk for k in [v['cell'].format(enc=e, head=h)] if k in o}   # 0.6.0: + ASG
     return dict(tep=name, ap=ap) if ap else None
 
 
@@ -260,12 +293,17 @@ def side_by_side(ctx, log=print):
     for h in hk:
         ranks = {}
         for n, v in cols.items():
-            hv = {e: x for (e, hh), x in v.items() if hh == h}
+            hv = {e: x for (e, hh), x in v.items() if hh == h and e in config.TABLE_ORDER}        # thứ hạng: 9 hàng đã khoá (như đã báo)
             order = sorted(hv, key=lambda e: -hv[e])
             ranks[n] = {e: order.index(e) + 1 for e in hv}
         log(f"--- {ht[h]} --- {'hang':<14}" + ''.join(f'{title[n]:>22}' for n in cols))
         for e in config.TABLE_ORDER:
             log(f"{'':<4}{config.ROW_TITLES[e]:<14}" + ''.join((f"{T.f3(cols[n][(e, h)])} (hang {ranks[n][e]})" if (e, h) in cols[n] else '-').rjust(22) for n in cols))
+        for x in config.EXTRA_ROWS:                   # 0.6.0: hàng thêm — MÔ TẢ: vị trí nếu xếp chung, không vào thứ hạng / Spearman ở trên
+            if any((x, h) in cols[n] for n in cols):
+                log(f"{'':<4}{(config.ROW_TITLES[x] + ' (them)'):<14}" + ''.join(
+                    (f"{T.f3(cols[n][(x, h)])} (thu {1 + sum(1 for e in ranks[n] if cols[n][(e, h)] > cols[n][(x, h)])}/{len(ranks[n]) + 1})" if (x, h) in cols[n]
+                     else '-').rjust(22) for n in cols))
         names = list(cols)
         sp = {}
         for i in range(len(names)):
@@ -310,17 +348,21 @@ def sync(ctx, log=print):
         per[name] = dict(dieu_kien=T.condition_text(bo), thieu=bo['thieu'], cong=bo['cong'], luot=bo['luot'], n_test=bo['n_test'], n_val=bo['n_val'],
                          so_duong_test=bo['so_duong_test'], so_cum_test=bo['so_cum_test'], nua_anh=bo['nua_anh'], nua_cum=bo['nua_cum'], n_boot=bo['n_boot'],
                          lan_rut_loai_toi_da=bo['lan_rut_loai_toi_da'], o={'|'.join(k): _slim(c) for k, c in bo['cells'].items()}, tran=bo.get('tran'),
-                         ho=bo.get('ho'), mo_ta=bo.get('mo_ta'), thu_hang=bo.get('thu_hang'), co_bien=bo.get('co_bien'), tiep_xuc=config.EXPOSURE[name],
+                         ho=bo.get('ho'), ho_them=bo.get('ho_them'), mo_ta=bo.get('mo_ta'), thu_hang=bo.get('thu_hang'), co_bien=bo.get('co_bien'),
+                         tiep_xuc=config.EXPOSURE[name],
                          duong_lr={e: v for e, v in bo['duong_lr'].items()})
     obj = _jsonable(dict(run=d['RUN_TAG'], t=t, goi=ctx['goi'], n_boot=config.N_BOOT, hat_boot=config.BOOT_SEED, hat_nua=config.HALF_SEED,
-                         luat=dict(nguong=config.RULE_DELTA, tran=config.CEILING, so_cua_luat='AP bac thang'), bo=per, canh_nhau=ctx.get('canh_nhau'),
+                         luat=dict(nguong=config.RULE_DELTA, tran=config.CEILING, so_cua_luat='AP bac thang', hang_them=list(config.EXTRA_ROWS),
+                                   ho_them='PLAN_93 13: ho RIENG B - hang them x 4 dau, max-T rieng; tran + ho 32 phep tinh tren 9 hang'), bo=per,
+                         canh_nhau=ctx.get('canh_nhau'),
                          ghi_chu='PLAN_93 5: so chinh = TB 5 hat; CI danh nghia tru khoang dong thoi max-T cua ho B - X; bootstrap theo cum (RSNA nguoi NIH, '
                                  'Shenzhen anh); AP = bac thang, AUPRC = hinh thang; Shenzhen: dieu khoan tran -> mo ta'))
     names.append(f'tong_hop_93_{t}.json')
     d['ghi'](names[-1], lambda q: d['ghi_json'](q, obj))
     n_csv = 0
     for name, bo in ctx['bo'].items():
-        for stem, rows in ((f'bang_dai_93_{name}', bo.get('bang_dai')), (f'ho_b_tru_x_93_{name}', bo.get('ho_bang'))):
+        for stem, rows in ((f'bang_dai_93_{name}', bo.get('bang_dai')), (f'ho_b_tru_x_93_{name}', bo.get('ho_bang')),
+                           (f'ho_b_tru_hang_them_93_{name}', bo.get('ho_them_bang'))):
             if rows:
                 names.append(f'{stem}_{t}.csv')
                 d['ghi'](names[-1], _csv_writer(rows))

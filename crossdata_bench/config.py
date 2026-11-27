@@ -103,23 +103,30 @@ def dataset(name):
 # ---- bảng gộp 93t (0.2.0) ----
 SUMMARY_TAG = 'r93t_tong_hop'
 TABLE_ORDER = ('b', 'raddino', 'chexfound', 'chexworld', 'biomedclip', 'mrm', 'evax', 'chexzero', 'pubmedclip')     # = vindr_bench.encoders.spec.ORDER
+# 0.6.0 (Tuấn 27/11, PLAN_93 §13): hàng THÊM ngoài 9 hàng đã khoá = vindr_bench.encoders.spec.EXTRA_ROWS ('asg'): có notebook lượt + bảng + hình, KHÔNG vào
+# RUN_ORDER / TABLE_ORDER / họ 32 phép B − X / điều khoản trần của §5 -> họ phép so RIÊNG B − ASG (4 phép mỗi bộ, max-T riêng).
+EXTRA_ROWS = ('asg',)
+ALL_ROWS = TABLE_ORDER + EXTRA_ROWS
 ROW_TITLES = {'b': 'B (của ta)', 'raddino': 'RAD-DINO', 'chexfound': 'CheXFound', 'chexworld': 'CheXWorld', 'biomedclip': 'BiomedCLIP', 'mrm': 'MRM',
-              'evax': 'EVA-X', 'chexzero': 'CheXzero', 'pubmedclip': 'PubMedCLIP'}
+              'evax': 'EVA-X', 'chexzero': 'CheXzero', 'pubmedclip': 'PubMedCLIP', 'asg': 'ASG'}
 # Số cụm của tập test (cổng của 93t): RSNA = người NIH (PLAN_88 §14.8, = bảng kho 93k); Shenzhen, JSRT = ảnh.
 TEST_CLUSTERS = {'rsna': 2290, 'shenzhen': 134, 'jsrt': 49, 'chexpert': 500}
 # Mức tiếp xúc tiền huấn luyện (KHÔNG nhãn) với ảnh của bộ — chép từ bảng PLAN_93 §2 (nguồn: hồ sơ 88 / bài báo; chỗ "chưa kiểm" giữ nguyên). Ghi ở mọi bảng.
+# ASG (0.6.0, PLAN_93 §13): tiền huấn luyện MIMIC-CXR; vùng từ Faster R-CNN học trên Chest ImaGenome (dẫn xuất MIMIC-CXR); khởi tạo DeiT-B ImageNet — theo mã
+# tiền huấn luyện ASGMVLP @ 110f3f4 (đọc 17/11) + spec 89; bài báo chưa kiểm lại.
+_ASG_EXPOSURE = '0 (MIMIC-CXR; theo mã tiền huấn luyện, bài chưa kiểm lại)'
 EXPOSURE = {
     'rsna': {'b': '100 % (thừa hưởng RAD-DINO)', 'raddino': '100 %', 'chexfound': '100 %', 'chexworld': '63,8 %', 'biomedclip': 'chưa xác minh', 'mrm': '0',
-             'evax': 'có (tỉ lệ chưa kiểm)', 'chexzero': '0', 'pubmedclip': 'chưa xác minh'},
+             'evax': 'có (tỉ lệ chưa kiểm)', 'chexzero': '0', 'pubmedclip': 'chưa xác minh', 'asg': _ASG_EXPOSURE},
     'shenzhen': {'b': 'không', 'raddino': 'không', 'chexfound': 'không', 'chexworld': 'không', 'biomedclip': 'chưa xác minh', 'mrm': '0',
-                 'evax': 'không (theo danh sách nguồn)', 'chexzero': '0', 'pubmedclip': 'chưa xác minh'},
+                 'evax': 'không (theo danh sách nguồn)', 'chexzero': '0', 'pubmedclip': 'chưa xác minh', 'asg': _ASG_EXPOSURE},
     # JSRT: CheXFound — bảng II (CXR-987K, 12 nguồn) không có JSRT, §IV-B nêu JSRT là bộ đánh giá ngoài "none of the images … used" (đọc arXiv 2502.05142v2, 23/11)
     'jsrt': {'b': 'không', 'raddino': 'không', 'chexfound': 'không (bài: bộ đánh giá ngoài)', 'chexworld': 'không', 'biomedclip': 'chưa xác minh', 'mrm': '0',
-             'evax': 'không (theo danh sách nguồn)', 'chexzero': '0', 'pubmedclip': 'chưa xác minh'},
+             'evax': 'không (theo danh sách nguồn)', 'chexzero': '0', 'pubmedclip': 'chưa xác minh', 'asg': _ASG_EXPOSURE},
     # CheXpert: PLAN_93 §2 (cột CheXpert) + Event 25/11 "CheXpert: Tuấn muốn chia theo CheXFound …" (bài CheXFound: tiền huấn luyện train + valid, giữ test)
     'chexpert': {'b': 'thừa hưởng RAD-DINO', 'raddino': 'có: 223.648 ảnh ≈ train + valid (suy từ số đếm, chưa kiểm)', 'chexfound': 'có: train + valid (bài); test chưa thấy',
                  'chexworld': 'có, bỏ val / test (phụ lục B.1)', 'biomedclip': 'chưa xác minh', 'mrm': '0', 'evax': 'có (phần nào chưa kiểm)',
-                 'chexzero': 'ảnh 0; checkpoint chọn theo val CheXpert (theo bài, chưa kiểm lại)', 'pubmedclip': 'chưa xác minh'},
+                 'chexzero': 'ảnh 0; checkpoint chọn theo val CheXpert (theo bài, chưa kiểm lại)', 'pubmedclip': 'chưa xác minh', 'asg': _ASG_EXPOSURE},
 }
 # Bảng VinDr của 89 (chỉ ĐỌC, để đặt cạnh thứ hạng; Ver2, kho đệm vuông không cân bằng = cùng giao thức + cùng kiểu kho): stage4_nb89/r89t_tong_hop
 VINDR_SUMMARY = dict(folder=('stage4_nb89', 'r89t_tong_hop'), pattern=r'tong_hop_89_\d{8}_\d{6}\.json', cell='v2|kcb|{enc}|{head}|luat', panel='p21')
